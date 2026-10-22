@@ -6,6 +6,10 @@
   "author": { "name": "Cerfaless (SASU EBO)", "url": "https://cerfaless.fr" },
   "homepage": "https://cerfaless.fr/dsnap",
   "icon": "assets/icon.png",
+  "documentationUrl": "https://cerfaless.fr/dsnap/aide",
+  "supportUrl": "https://cerfaless.fr/contact",
+  "privacyPolicyUrl": "https://cerfaless.fr/confidentialite",
+  "termsOfServiceUrl": "https://cerfaless.fr/cgv",
   "repository": "https://github.com/64Etienne/cerfaless-dsnap",
   "license": "LicenseRef-DSNap",
   "keywords": ["dsn", "paie", "net-entreprises", "urssaf", "sasu", "president", "dsn-neant", "bulletin-de-paie", "france"]
