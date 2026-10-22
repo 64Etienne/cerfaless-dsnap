@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-mcpb/
+temp-staging/
+server/nomenclatures/
+*.tmp
+*.log
+.DS_Store

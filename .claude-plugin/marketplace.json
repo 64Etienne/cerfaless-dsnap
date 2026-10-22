@@ -1,0 +1,14 @@
+{
+  "name": "cerfaless",
+  "description": "DSNap : paie et DSN du président de SASU, déposée sur net-entreprises depuis Claude.",
+  "owner": { "name": "Cerfaless (SASU EBO)", "url": "https://cerfaless.fr" },
+  "plugins": [
+    {
+      "name": "dsnap",
+      "source": "./",
+      "description": "Paie et DSN mensuelle du président de SASU assimilé salarié, contrôlée et déposée sur net-entreprises. DSN néant gratuite.",
+      "category": "productivity",
+      "tags": ["dsn", "paie", "france", "urssaf"]
+    }
+  ]
+}

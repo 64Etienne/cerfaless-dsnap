@@ -1,0 +1,46 @@
+{
+  "manifest_version": "0.2",
+  "name": "dsnap",
+  "display_name": "DSNap",
+  "version": "1.0.0",
+  "description": "Paie et DSN du président de SASU : bulletin, DSN contrôlée, dépôt sur net-entreprises. DSN néant gratuite.",
+  "long_description": "DSNap prépare la paie mensuelle du président de SASU assimilé salarié (bulletin et note de frais en PDF), fabrique la DSN, la contrôle comme net-entreprises (format, cahier technique, recalcul Urssaf, codes des tables officielles mises à jour automatiquement), la dépose par l'API officielle de net-entreprises en test puis en réel après votre accord, et lit les bilans et comptes rendus. Vos identifiants net-entreprises sont chiffrés dans le trousseau de votre ordinateur ; votre numéro de sécurité sociale est saisi sur une page locale et masqué dans toutes les réponses de DSNap. DSN néant gratuite ; paie avec salaire : essai de 7 jours puis 6,90 €/mois ou 70 €/an. Mode démonstration inclus. Après l'installation, demandez à Claude : « Configure DSNap ».",
+  "author": { "name": "Cerfaless (SASU EBO)", "url": "https://cerfaless.fr" },
+  "homepage": "https://cerfaless.fr/dsnap",
+  "documentation": "https://cerfaless.fr/dsnap/installation",
+  "support": "https://cerfaless.fr/dsnap/aide",
+  "icon": "icon.png",
+  "server": {
+    "type": "node",
+    "entry_point": "server/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/server/index.js"],
+      "env": {}
+    }
+  },
+  "tools": [
+    { "name": "etat_dsnap", "description": "Où en est DSNap : dossier, société, identifiants, abonnement, échéance." },
+    { "name": "configurer_dsnap", "description": "Ouvre la page de configuration locale (ou la démonstration)." },
+    { "name": "preparer_dsn", "description": "Paie du mois : DSN test et réelle, bulletin et note de frais PDF, contrôles." },
+    { "name": "simuler_budget", "description": "Brut maximal pour un budget mensuel." },
+    { "name": "verifier_fichier_dsn", "description": "Contrôle complet d'un fichier DSN." },
+    { "name": "deposer_dsn", "description": "Dépôt test ou réel sur net-entreprises et bilan." },
+    { "name": "bilan_du_depot", "description": "Bilan de conformité d'un dépôt." },
+    { "name": "lister_retours", "description": "Retours d'un dépôt et leur statut." },
+    { "name": "telecharger_retour", "description": "Télécharge et lit un retour." },
+    { "name": "rechercher_depots", "description": "Dépôts d'une période, y compris hors DSNap." },
+    { "name": "lister_depots", "description": "Dépôts d'une journée." },
+    { "name": "journal_depots", "description": "Journal local des dépôts." },
+    { "name": "tester_connexion", "description": "Vérifie les identifiants net-entreprises." },
+    { "name": "mettre_a_jour_tables", "description": "Met à jour les tables de référence DSN." },
+    { "name": "abonnement_dsnap", "description": "Statut de l'abonnement et liens." }
+  ],
+  "keywords": ["dsn", "paie", "net-entreprises", "urssaf", "sasu", "dsn-neant"],
+  "license": "LicenseRef-DSNap",
+  "privacy_policies": ["https://cerfaless.fr/confidentialite"],
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": { "node": ">=18.0.0" }
+  }
+}
