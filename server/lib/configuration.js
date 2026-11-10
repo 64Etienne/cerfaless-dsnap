@@ -24,7 +24,7 @@ const dossierMod = require('./dossier.js');
 const paie = require('./paie.js');
 const tables = require('./tables.js');
 const demo = require('./demo.js');
-const E = require('./engine.js');
+const E = require('./noyau.js');
 
 const INACTIVITE = 30 * 60 * 1000;
 const TABLES_AUTORISEES = ['IBC', 'PCSESE', 'RAT', 'NAF', 'PAYS', 'IDCC'];
@@ -281,7 +281,7 @@ async function traiter(req, res) {
       try {
         const now = new Date();
         const mois = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
-        const r = paie.preparer({ dossier: d, cfg: cfg, mois: mois, brut: 1000, simuler: true, controleurTables: tables.controleur(), version: contexte && contexte.version });
+        const r = await paie.preparer({ dossier: d, cfg: cfg, mois: mois, brut: 0, simuler: true, controleurTables: tables.controleur(), version: contexte && contexte.version }); // sur l'ordinateur : une DSN néant suffit à vérifier la société
         verification = { pret: r.pret, erreurs: r.erreurs.filter(function (e) { return !/paies de|norme/.test(e); }).slice(0, 8) };
       } catch (e) { verification = { pret: false, erreurs: [e.message] }; }
       if (contexte && contexte.apresConfiguration) contexte.apresConfiguration();

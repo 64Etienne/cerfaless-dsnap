@@ -22,17 +22,25 @@ function fail(msg, extra) { const e = new Error(msg); e.utilisateur = true; if (
 function ouvrir(racine) {
   if (!racine) throw fail('Aucun dossier de paie configuré : ouvrez la configuration de DSNap (outil configurer_dsnap).', { configuration: true });
   if (!fs.existsSync(racine)) throw fail('Le dossier de paie configuré est introuvable : ' + racine + '. Ouvrez la configuration de DSNap pour en choisir un autre.', { configuration: true });
-  const reel = fs.realpathSync(racine);
+  const reel = fs.realpathSync(racine), base = path.resolve(racine);
 
+  function interieur(racineDossier, abs) { const rel = path.relative(racineDossier, abs); return !(rel === '..' || rel.startsWith('..' + path.sep) || path.isAbsolute(rel)); }
   function dans(p) {
-    const abs = path.resolve(reel, String(p || ''));
+    const s = String(p || '');
+    const abs = path.resolve(reel, s);
+    // contrôle lexical AVANT tout accès disque : un chemin réseau (\\hôte\partage, //hôte/…, /net/hôte/…) ou hors du
+    // dossier ne doit déclencher aucune connexion (SMB, WebDAV, montage automatique, résolution de nom)
+    // « .. » est refusé avec les deux séparateurs, sur tous les systèmes : « ..\x » remonte d'un dossier sous Windows,
+    // et un nom de fichier de paie n'en contient jamais ailleurs (même règle partout, même dossier synchronisé)
+    if (s.indexOf('\0') >= 0 || /^[\\/]{2}/.test(s) || s.split(/[\\/]/).indexOf('..') >= 0 || (!interieur(reel, abs) && !interieur(base, path.resolve(base, s)))) throw fail('Fichier hors du dossier de paie : ' + p);
     const r = fs.existsSync(abs) ? fs.realpathSync(abs) : abs;
-    const rel = path.relative(reel, r);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) throw fail('Fichier hors du dossier de paie : ' + p);
+    // puis contrôle du chemin réel (liens symboliques et jonctions qui sortiraient du dossier)
+    if (!interieur(reel, r)) throw fail('Fichier hors du dossier de paie : ' + p);
     return r;
   }
   function relatif(abs) { return path.relative(reel, abs).split(path.sep).join('/'); }
-  function sous(nom) { const d = path.join(reel, nom); fs.mkdirSync(d, { recursive: true }); return d; }
+  // dossiers et fichiers de paie privés (NIR, IBAN) : 0700 et 0600, quel que soit le masque de création (umask)
+  function sous(nom) { const d = path.join(reel, nom); fs.mkdirSync(d, { recursive: true, mode: 0o700 }); return d; }
 
   function cheminConfig() {
     const n = path.join(reel, 'dsnap.json'), a = path.join(reel, 'paie-dsn.json');
@@ -45,7 +53,7 @@ function ouvrir(racine) {
   }
   function ecrireConfig(cfg) {
     const f = path.join(reel, 'dsnap.json'), tmp = f + '.' + process.pid + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, f);
     return f;
   }
@@ -60,7 +68,7 @@ function ouvrir(racine) {
     });
     return e;
   }
-  function ecrireEtat(e) { fs.writeFileSync(path.join(reel, 'dsnap-etat.json'), JSON.stringify(e, null, 2)); }
+  function ecrireEtat(e) { fs.writeFileSync(path.join(reel, 'dsnap-etat.json'), JSON.stringify(e, null, 2), { mode: 0o600 }); }
 
   function dossierMois(mois) {
     const m = /^(\d{4})-(\d{2})$/.exec(mois);
@@ -79,7 +87,7 @@ function ouvrir(racine) {
   }
   function ecrireJournal(j) {
     const f = cheminJournal(), tmp = f + '.' + process.pid + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(j, null, 2));
+    fs.writeFileSync(tmp, JSON.stringify(j, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, f);
   }
   function ajouterJournal(entree) { const j = lireJournal(); j.push(entree); ecrireJournal(j); return entree; }
@@ -108,6 +116,19 @@ function ouvrir(racine) {
     return function () { try { fs.unlinkSync(f); } catch (e) { /* déjà libéré */ } };
   }
 
+  /** Le fichier commence-t-il comme une DSN (S10.G00.00.001) ? Lit seulement les 32 premiers octets d'un fichier régulier. */
+  function estDsn(f) {
+    // ouvert d'abord, sans attendre (un tube nommé ne bloque pas), puis contrôlé sur le descripteur ouvert : rien ne peut
+    // remplacer le fichier entre le contrôle et la lecture (alerte CodeQL js/file-system-race du 10/11)
+    let fd;
+    try { fd = fs.openSync(f, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0)); } catch (e) { return false; }
+    try {
+      if (!fs.fstatSync(fd).isFile()) return false;
+      const b = Buffer.alloc(32);
+      fs.readSync(fd, b, 0, 32, 0);
+      return /^S10\.G00\.00\.001,/.test(b.toString('latin1'));
+    } catch (e) { return false; } finally { try { fs.closeSync(fd); } catch (e) { /* rien */ } }
+  }
   /** Fichiers DSN du dossier (au plus 3 niveaux), sans les retours. */
   function fichiersDsn() {
     const out = [];
@@ -117,16 +138,13 @@ function ouvrir(racine) {
         const p = path.join(d, x.name);
         if (x.isDirectory()) { if (niveau < 3 && x.name !== 'retours' && x.name[0] !== '.') parcourir(p, niveau + 1); return; }
         if (!/\.(txt|dsn|edi)$/i.test(x.name)) return;
-        try {
-          const fd = fs.openSync(p, 'r'), b = Buffer.alloc(32); fs.readSync(fd, b, 0, 32, 0); fs.closeSync(fd);
-          if (/^S10\.G00\.00\.001,/.test(b.toString('latin1'))) out.push(relatif(p));
-        } catch (e) { /* illisible */ }
+        if (estDsn(p)) out.push(relatif(p));
       });
     })(reel, 0);
     return out.sort();
   }
 
-  return { racine: reel, dans, relatif, sous, cheminConfig, lireConfig, ecrireConfig, lireEtat, ecrireEtat, dossierMois, retours, cheminJournal, lireJournal, ajouterJournal, majJournal, majEntree, verrouiller, fichiersDsn };
+  return { racine: reel, dans, relatif, sous, cheminConfig, lireConfig, ecrireConfig, lireEtat, ecrireEtat, dossierMois, retours, cheminJournal, lireJournal, ajouterJournal, majJournal, majEntree, verrouiller, fichiersDsn, estDsn };
 }
 
 function nomSur(s) { return String(s).replace(/[^A-Za-z0-9._ -]/g, '_').slice(0, 120); }

@@ -1,7 +1,7 @@
 {
   "name": "dsnap",
   "displayName": "DSNap",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Paie et DSN mensuelle du président de SASU assimilé salarié : bulletin, DSN contrôlée avec les tables officielles, dépôt sur net-entreprises et suivi des retours. DSN néant gratuite.",
   "author": { "name": "Cerfaless (SASU EBO)", "url": "https://cerfaless.fr" },
   "homepage": "https://cerfaless.fr/dsnap",
