@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // DSNap © 2026 SASU EBO (Cerfaless). Code source consultable sous la licence DSNap : voir LICENSE.
 'use strict';
 // Point d'entrée du serveur MCP de DSNap (lancé par Claude : plugin, extension de bureau ou Claude Code).
@@ -6,4 +7,5 @@ if (+process.versions.node.split('.')[0] < 18) {
   process.stderr.write('DSNap demande Node.js 18 ou plus récent (version actuelle : ' + process.version + ').\n');
   process.exit(1);
 }
+process.env.PATH = require('./lib/chemins.js').binairesSurs(process.env.PATH);
 require('./lib/serveur.js').demarrer();

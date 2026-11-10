@@ -496,45 +496,78 @@ function horsLigne(msg) { const e = new Error(msg); e.horsLigne = true; return e
  * Transport réseau : fetch de Node, puis curl si fetch n'aboutit pas (proxy, certificat…).
  * 404 → null ; 429 et 5xx (maintenance) ou réseau coupé → erreur « hors ligne ».
  */
-function transportReseau() {
+// les liens viennent d'une page web : seuls les serveurs de net-entreprises, en https, sont joints
+function urlAutorisee(u) {
+  try { const x = new URL(String(u)); return x.protocol === 'https:' && /^(?:www|portail)\.net-entreprises\.fr$/.test(x.hostname) && !x.username && !x.password && (!x.port || x.port === '443'); }
+  catch (e) { return false; }
+}
+/** o.autorise : contrôle des adresses (tests : serveur local). */
+function transportReseau(o) {
+  const autorise = (o && o.autorise) || urlAutorisee;
   // curl du système (chemin absolu sous Windows : pas de binaire pris dans le dossier courant), sans bloquer le serveur
   function binCurl() {
     if (process.platform !== 'win32') return 'curl';
     const p = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'curl.exe');
     return fs.existsSync(p) ? p : null;
   }
+  // une requête, sans suivre de redirection : chaque étape est contrôlée par get() AVANT d'être jointe
   function parCurl(url, delai) {
     return new Promise(function (resolve, reject) {
       const bin = binCurl();
       if (!bin) { reject(new Error('curl absent')); return; }
-      const tmp = path.join(os.tmpdir(), 'dsnap-' + process.pid + '-' + Date.now() + '.dl');
-      execFile(bin, ['-sS', '-L', '--max-time', String(Math.ceil(delai / 1000)), '-A', UA, '-o', tmp, '-w', '%{http_code}', url], { encoding: 'utf8', windowsHide: true, timeout: delai + 5000 }, function (err, stdout) {
-        const code = String(stdout || '').trim();
-        const fin = function (f) { try { f(); } finally { try { fs.unlinkSync(tmp); } catch (e) { /* rien */ } } };
+      // dossier temporaire privé (nom imprévisible, 0700) : personne d'autre ne peut y préparer ni y lire le fichier
+      let dir;
+      try { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsnap-')); } catch (e) { reject(e); return; }
+      const tmp = path.join(dir, 'telechargement');
+      const proto = autorise === urlAutorisee ? ['--proto', '=https'] : [];
+      execFile(bin, ['-sS'].concat(proto, ['--max-time', String(Math.ceil(delai / 1000)), '-A', UA, '-o', tmp, '-w', '%{http_code}\\n%{redirect_url}', url]), { encoding: 'utf8', windowsHide: true, timeout: delai + 5000 }, function (err, stdout) {
+        const sortie = String(stdout || '').split('\n'), code = sortie[0].trim(), suite = (sortie[1] || '').trim();
+        const fin = function (f) { try { f(); } catch (e) { reject(e); } finally { try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { /* rien */ } } };
         if (err && !code) { fin(function () { reject(err); }); return; }
         fin(function () {
-          if (code === '404') return resolve(null);
-          if (code === '429' || /^5\d\d$/.test(code)) return reject(horsLigne('net-entreprises indisponible (HTTP ' + code + ')'));
-          if (!/^2\d\d$/.test(code)) return reject(new Error('HTTP ' + code + ' pour ' + url));
-          resolve(fs.readFileSync(tmp));
+          if (/^3\d\d$/.test(code) && suite) return resolve({ status: +code, location: suite });
+          resolve({ status: +code || 0, corps: /^2\d\d$/.test(code) ? fs.readFileSync(tmp) : null });
         });
       });
     });
+  }
+  function parFetch(url, signal) {
+    return fetch(url, { headers: { 'User-Agent': UA }, redirect: 'manual', signal: signal }).then(async function (r) {
+      if (r.status >= 300 && r.status < 400 && r.headers.get('location')) { try { await r.body.cancel(); } catch (e) { /* rien */ } return { status: r.status, location: r.headers.get('location') }; }
+      return { status: r.status, corps: r.ok ? Buffer.from(await r.arrayBuffer()) : null };
+    });
+  }
+  function refus(msg) { const e = new Error(msg); e.refus = true; return e; }
+  // suit au plus 5 redirections, chacune vers une adresse autorisée, sans jamais joindre une adresse refusée
+  async function suivre(une, url) {
+    let u = url;
+    for (let n = 0; ; n++) {
+      const r = await une(u);
+      if (r.location === undefined) return r;
+      if (n >= 5) throw refus('Trop de redirections pour ' + String(url).slice(0, 120));
+      let suivante;
+      try { suivante = new URL(r.location, u).href; } catch (e) { suivante = String(r.location); }
+      if (!autorise(suivante)) throw refus('Redirection refusée hors de net-entreprises : ' + suivante.slice(0, 120));
+      u = suivante;
+    }
   }
   return {
     nom: 'réseau',
     get: async function (url, opt) {
       const delai = (opt && opt.delai) || DELAI_FICHIER;
+      if (!autorise(url)) throw new Error('Adresse de téléchargement refusée (seuls www.net-entreprises.fr et portail.net-entreprises.fr, en https) : ' + String(url).slice(0, 120));
       let r;
-      try { r = await fetch(url, { headers: { 'User-Agent': UA }, redirect: 'follow', signal: AbortSignal.timeout(delai) }); }
+      const signal = AbortSignal.timeout(delai);
+      try { r = await suivre(function (u) { return parFetch(u, signal); }, url); }
       catch (e) {
-        try { return await parCurl(url, delai); }
-        catch (e2) { if (e2.horsLigne) throw e2; throw horsLigne('net-entreprises injoignable (' + (e.cause && e.cause.code || e.name || e.message) + ' ; curl : ' + String(e2.message).split('\n')[0] + ')'); }
+        if (e.refus) throw e;
+        try { r = await suivre(function (u) { return parCurl(u, delai); }, url); }
+        catch (e2) { if (e2.refus || e2.horsLigne) throw e2; throw horsLigne('net-entreprises injoignable (' + (e.cause && e.cause.code || e.name || e.message) + ' ; curl : ' + String(e2.message).split('\n')[0] + ')'); }
       }
       if (r.status === 404) return null;
       if (r.status === 429 || r.status >= 500) throw horsLigne('net-entreprises indisponible (HTTP ' + r.status + ')');
-      if (!r.ok) throw new Error('HTTP ' + r.status + ' pour ' + url);
-      return Buffer.from(await r.arrayBuffer());
+      if (!(r.status >= 200 && r.status < 300)) throw new Error('HTTP ' + r.status + ' pour ' + url);
+      return r.corps;
     }
   };
 }

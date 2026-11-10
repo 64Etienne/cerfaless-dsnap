@@ -1,12 +1,14 @@
 // DSNap © 2026 SASU EBO (Cerfaless). Code source consultable sous la licence DSNap : voir LICENSE.
 /* =====================================================================
-   DSNap — moteur de calcul de la paie et de la DSN
-   Cas couvert : SASU, président assimilé salarié (mandat social, pas de
-   contrat de travail), un seul individu, salaire mensuel ≤ PMSS, règles 2026.
+   DSNap — noyau public : format de la DSN, fichier, contrôles de forme.
+   Aucun taux, plafond ni barème ici : le calcul d'une paie avec salaire se fait
+   sur le serveur de Cerfaless, qui rend le résultat r (montants et taux utiles).
+   buildDSN fabrique le fichier sur l'ordinateur à partir de r : l'identité ne part pas.
+   La DSN néant ne demande aucun calcul : resultatNeant la prépare ici, sans réseau.
    Toutes les sommes sont en CENTIMES (entiers). Les taux sont en
-   millièmes de pourcent (1 = 0,001 %) : 6 800 = 6,80 %.
+   millièmes de pourcent (1 = 0,001 %).
    ===================================================================== */
-var Engine = (function () {
+var Noyau = (function () {
   'use strict';
 
   /* ---------- 1. Arithmétique entière ---------- */
@@ -96,36 +98,6 @@ var Engine = (function () {
   }
 
   /* ---------- 4. Paramètres 2026 ---------- */
-  var P = {
-    annee: 2026,
-    pmss: 400500,          // plafond mensuel de la Sécurité sociale 2026
-    csgAssiette: 98250,    // assiette CSG/CRDS = 98,25 % du brut (abattement 1,75 %)
-    csgDed: 6800, csgNd: 2400, crds: 500,
-    vpS: 6900, vdS: 400,   // vieillesse salariale plafonnée / déplafonnée
-    aaS: 3150, cegS: 860, apecS: 24,
-    mal: 7000, malC: 6000, // maladie 13 % = 7 % (code 075) + 6 % (code 907)
-    af: 3450, afC: 1800,   // allocations familiales 5,25 % = 3,45 % (074) + 1,80 % (102)
-    vpP: 8550, vdP: 2110,
-    csa: 300, fnal: 100, dial: 16, cfp: 550, ta: 590,
-    aaP: 4720, cegP: 1290, apecP: 36,
-    acre: 36210,           // ACRE : 13 + 5,25 + 15,45 + 2,51 = 36,21 % du brut
-    trPatMax: 732,         // part patronale maximale exonérée d'un titre-restaurant en 2026
-    // Grille du taux neutre (métropole) à compter du 01/05/2026 — BOI-BAREME-000037
-    // [base mensuelle strictement inférieure à (centimes), taux (centièmes de %)]
-    pasGrid: [[163500, 0], [169800, 50], [180700, 130], [192800, 210], [206000, 290], [217000, 350], [231500, 410],
-      [273800, 530], [313500, 750], [357100, 990], [401900, 1190], [469000, 1380], [562400, 1580], [703700, 1790],
-      [878900, 2000], [1220000, 2400], [1652300, 2800], [2593700, 3300], [5555800, 3800]]
-  };
-  // Grille 2025 (BOI-BAREME-000037, version 2025), restée en vigueur jusqu'au 30/04/2026
-  P.pasGrid2025 = [[162000, 0], [168300, 50], [179100, 130], [191100, 210], [204200, 290], [215100, 350], [229400, 410],
-    [271400, 530], [310700, 750], [353900, 990], [398300, 1190], [464800, 1380], [557400, 1580], [697400, 1790],
-    [871100, 2000], [1209100, 2400], [1637600, 2800], [2570600, 3300], [5506200, 3800]];
-  function pasBareme(base, dateVersement) {
-    var g = dateVersement && dnum(dateVersement) < dnum({ y: 2026, m: 5, d: 1 }) ? P.pasGrid2025 : P.pasGrid;
-    for (var i = 0; i < g.length; i++) if (base < g[i][0]) return { bp: g[i][1], i: i, grille: g === P.pasGrid ? 'mai 2026' : '2025' };
-    return { bp: 4300, i: g.length, grille: g === P.pasGrid ? 'mai 2026' : '2025' };
-  }
-
   /* ---------- 5. Dictionnaires (valeurs codées) ---------- */
   var CODE81 = {
     '011': "Exonération créateur/repreneur d'entreprise (ACRE)", '045': 'Cotisation accident du travail', '049': 'Allocation de logement (FNAL)',
@@ -250,188 +222,52 @@ var Engine = (function () {
     return { lines: lines, total: tot, prorataMilli: prorataMilli, prorataTxt: prorataTxt };
   }
 
-  /* ---------- 8. Calcul de la paie ---------- */
-  function compute(st) {
-    var inp = st.inp, C = st.contrat || {};
-    var r = { err: [], warn: [], info: [], c: {} }, c = r.c;
-    var mo = /^(\d{4})-(\d{2})$/.exec(inp.mois || '');
+  /* ---------- 8. DSN néant : le résultat, sans calcul ---------- */
+  var ANNEE_NORME = 2026, NORME = 'P26V01';
+  // Période du mois déclaré, commune au noyau et au calcul du serveur
+  function periode(st, r) {
+    var mo = /^(\d{4})-(\d{2})$/.exec(st.inp.mois || '');
     if (!mo || +mo[2] < 1 || +mo[2] > 12) { r.err.push('Mois déclaré invalide.'); mo = [null, '2026', '08']; }
     var y = +mo[1], m = +mo[2];
     r.y = y; r.m = m; r.dim = dim(y, m); r.debut = { y: y, m: m, d: 1 }; r.fin = { y: y, m: m, d: r.dim };
     r.label = moisLabel(y, m);
-    var B = Math.max(0, Math.round(+inp.brut || 0));
-    r.B = B; r.neant = B === 0;
-    if (y !== P.annee && B > 0) r.err.push('Les taux, plafonds et la norme DSN de DSNap sont ceux de ' + P.annee + ' : les paies de ' + y + ' ne sont pas encore prises en charge (mise à jour annoncée sur le site de DSNap).');
-    if (y !== P.annee && B === 0 && y < P.annee) r.err.push('DSN de ' + y + ' : seule la norme ' + P.annee + ' (P26V01) est prise en charge.');
-    if (y > P.annee && B === 0) r.err.push('DSN de ' + y + ' : la norme ' + (y === 2027 ? 'P27V01' : 'de cette année') + ' n\'est pas encore prise en charge par DSNap (mise à jour prévue avant la première échéance de ' + y + ').');
-    if (B > P.pmss) r.err.push('Brut supérieur au plafond mensuel (' + eur(P.pmss) + ') : la tranche 2 (Agirc-Arrco T2, CET…) n\'est pas encore gérée par DSNap.');
-    var Bp = Math.min(B, P.pmss); r.Bp = Bp;
-    var H0 = st.hdr || {}, cpEts = String(H0['S21.G00.11.004'] || H0['S21.G00.06.005'] || '');
-    if (B > 0 && (C['S21.G00.40.016'] === '01' || /^(57|67|68)/.test(cpEts))) r.err.push('Régime local d\'Alsace-Moselle (départements 57, 67, 68) : cotisation maladie supplémentaire non encore gérée par DSNap.');
-    if (B > 0 && C['S21.G00.40.007'] && C['S21.G00.40.007'] !== '80') r.err.push('Nature du contrat ' + C['S21.G00.40.007'] + ' : DSNap ne prend en charge que le mandat social de président assimilé salarié (code 80).');
-    var csgBase = pm(B, P.csgAssiette); r.csgBase = csgBase;
-
-    // Cotisations, chacune arrondie au centime (comme sur un bulletin)
-    c.csgDed = pm(csgBase, P.csgDed); c.csgNd = pm(csgBase, P.csgNd); c.crds = pm(csgBase, P.crds);
-    c.vpS = pm(Bp, P.vpS); c.vdS = pm(B, P.vdS);
-    c.aaS = pm(Bp, P.aaS); c.cegS = pm(Bp, P.cegS); c.apecS = pm(B, P.apecS);
-    c.mal = pm(B, P.mal); c.malC = pm(B, P.malC); c.af = pm(B, P.af); c.afC = pm(B, P.afC);
-    c.vpP = pm(Bp, P.vpP); c.vdP = pm(B, P.vdP);
-    c.csa = pm(B, P.csa); c.fnal = pm(Bp, P.fnal); c.dial = pm(B, P.dial); c.cfp = pm(B, P.cfp); c.ta = pm(B, P.ta);
-    var atMilli = Math.round((+inp.atTaux || 0) / 10) * 10; r.atMilli = atMilli; // taux AT à 2 décimales
-    c.at = pm(B, atMilli);
-    c.aaP = pm(Bp, P.aaP); c.cegP = pm(Bp, P.cegP); c.apecP = pm(B, P.apecP);
-
-    // ACRE (ancien régime : exonération totale ≤ 75 % PMSS, dégressive jusqu'au PMSS)
-    var acreFin = parseISO(inp.acreFin);
-    var mode = inp.acreMode || 'aucune', jours = r.dim;
-    if ((mode === 'auto' || mode === 'prorata') && !acreFin) { if (B > 0) r.err.push('ACRE : indiquez la date de fin de l\'exonération (12 mois après la création ou la reprise) dans la configuration.'); mode = 'aucune'; }
-    if (mode === 'auto') {
-      if (dnum(r.fin) <= dnum(acreFin)) mode = 'complete';
-      else if (dnum(r.debut) > dnum(acreFin)) mode = 'aucune';
-      else mode = 'prorata';
-    }
-    if (mode === 'prorata') jours = Math.max(0, Math.min(r.dim, dnum(acreFin) - dnum(r.debut) + 1));
-    var seuil = rhu(P.pmss * 3, 4), zone = 'aucune', exoPlein = 0;
-    if (B > 0 && mode !== 'aucune') {
-      if (B <= seuil) { zone = 'totale'; exoPlein = pm(B, P.acre); }
-      else if (B < P.pmss) { zone = 'degressive'; exoPlein = rhu((P.pmss - B) * P.acre * 3, 100000); }
-      else zone = 'nulle';
-    }
-    // Régime : créations et reprises depuis le 1er janvier 2026 → exonération ramenée à 25 % (LFSS 2026, art. 23 ;
-    // décret n° 2026-69). Le début de l'ACRE se déduit de sa fin (12 mois) si le régime n'est pas indiqué.
-    var regime = inp.acreRegime;
-    if (regime !== 'ancien' && regime !== '2026') {
-      var debutAcre = acreFin ? { y: acreFin.y - 1, m: acreFin.m, d: acreFin.d } : null;
-      regime = debutAcre && dnum(debutAcre) >= dnum({ y: 2025, m: 12, d: 31 }) ? '2026' : 'ancien';
-    }
-    if (regime === '2026' && exoPlein > 0) exoPlein = rhu(exoPlein * 25, 100);
-    var exo = mode === 'prorata' ? rhu(exoPlein * jours, r.dim) : exoPlein;
-    var salEx = c.vpS + c.vdS, patEx = c.mal + c.malC + c.af + c.afC + c.vpP + c.vdP;
-    var exoS = 0;
-    if (exo > 0) exoS = (zone === 'totale' && mode === 'complete' && regime === 'ancien') ? Math.min(salEx, exo) : rhu(exo * salEx, salEx + patEx);
-    c.exo = exo; c.exoS = exoS; c.exoP = exo - exoS;
-    r.acre = { mode: mode, zone: zone, jours: jours, seuil: seuil, fin: acreFin, exoPlein: exoPlein, regime: regime };
-    if (exo > 0 && regime === '2026') r.info.push('ACRE, régime des créations depuis le 1er janvier 2026 : exonération ramenée à 25 % des cotisations concernées (LFSS 2026, décret n° 2026-69). Vérifiez que l\'Urssaf vous l\'a accordée (demande obligatoire dans les 60 jours suivant la création).');
-    if (mode === 'prorata') r.warn.push('ACRE : le mois chevauche la fin de l\'exonération (' + fr(acreFin) + '). DSNap applique un prorata ' + jours + '/' + r.dim + ' jours — règle à confirmer avec l\'Urssaf.');
-    if (zone === 'degressive') r.warn.push('ACRE dégressive (brut entre ' + eur(seuil) + ' et ' + eur(P.pmss) + ') : calcul indicatif ; l\'Urssaf apprécie le seuil sur la rémunération annuelle.');
-
-    // Totaux
-    r.totSal = c.csgDed + c.csgNd + c.crds + c.vpS + c.vdS + c.aaS + c.cegS + c.apecS - c.exoS;
-    r.totPatBrut = c.mal + c.malC + c.af + c.afC + c.vpP + c.vdP + c.csa + c.fnal + c.dial + c.cfp + c.ta + c.at + c.aaP + c.cegP + c.apecP;
-    r.totPat = r.totPatBrut - c.exoP;
-    r.net = B - r.totSal;
-    r.rnf = r.net + c.csgNd + c.crds;
-
-    // Prélèvement à la source
-    if (inp.pasMode === 'dgfip') { r.pasBp = Math.round(+inp.pasTaux || 0); r.pasType = '01'; r.pasTranche = null; }
-    else { var g = pasBareme(r.rnf, parseISO(inp.dateVersement)); r.pasBp = g.bp; r.pasType = '13'; r.pasTranche = g.i; r.pasGrille = g.grille; }
-    r.pas = rhu(r.rnf * r.pasBp, 10000);
-    r.pasVersement = toEuro(r.pas);        // versement DGFiP (bloc 20) arrondi à l'euro
-    r.netVerse = r.net;                    // S21.G00.50.004 : le PAS n'est pas déduit (CT 2026.1)
-    r.netApresImpot = r.net - r.pas;
-    r.mns = r.net; // montant net social : pas de mutuelle/prévoyance ni d'avantage
-
-    // Titres-restaurant
-    var fac = Math.round(+inp.trFaciale || 0), partMille = Math.round((+inp.trPartPat || 0) * 10);
-    r.trPatU = rhu(fac * partMille, 1000); r.trSalU = fac - r.trPatU;
-    r.trNb = Math.max(0, Math.round(+inp.trNb || 0));
-    r.trTotal = r.trNb * fac; r.trPat = r.trNb * r.trPatU; r.trSal = r.trNb * r.trSalU;
-    r.netPaye = r.netApresImpot - r.trSal;
-    r.jo = joursOuvres(y, m);
-
-    // Frais, coût, budget
-    r.frais = computeFrais(inp);
-    r.coutSalaire = B + r.totPat;
-    r.budget = r.coutSalaire + r.frais.total + r.trPat;
-
-    // Urssaf : partie nominative (somme exacte) et partie agrégée (CTP arrondis à l'euro, guide Urssaf §1.6)
-    r.urssafNominatif = c.csgDed + c.csgNd + c.crds + c.dial + c.fnal + c.csa + c.cfp + c.ta + c.at +
-      c.mal + c.malC + c.af + c.afC + c.vpS + c.vpP + c.vdS + c.vdP - c.exo;
-    var aB = toEuro(B), aBp = toEuro(Bp), aCsg = toEuro(csgBase);
-    var ctp = [];
-    function T(code, q, assiette, taux, extra) {
-      var o = { code: code, q: q, assiette: assiette, taux: taux };
-      for (var k in extra) o[k] = extra[k];
-      if (o.deduction) { o.du = -o.montant; o.calc = 'déduction ' + eur(o.montant); }
-      else { o.du = toEuro(pm(assiette, taux)); o.calc = eur(assiette) + ' × ' + pct(taux) + ' = ' + eur(pm(assiette, taux)) + ' → ' + eur(o.du); }
-      ctp.push(o);
-    }
-    if (B > 0) {
-      T('027', '920', aB, P.dial);
-      T('260', '920', aCsg, P.csgDed + P.csgNd + P.crds);
-      T('332', '921', aBp, P.fnal);
-      if (c.exo > 0) T('401', '921', null, null, { deduction: true, montant: toEuro(c.exo) });
-      T('863', '920', aB, P.mal + P.malC + P.af + P.afC + P.vdS + P.vdP + P.csa + atMilli, { tauxAT: atMilli });
-      T('863', '921', aBp, P.vpS + P.vpP);
-      T('959', '920', aB, P.cfp);
-      T('992', '920', aB, P.ta);
-    }
-    r.ctp = ctp;
-    r.bordereau = ctp.reduce(function (s, t) { return s + t.du; }, 0);
-    if (r.bordereau < 0) r.bordereau = 0;
-    r.aa = c.aaS + c.aaP + c.cegS + c.cegP; r.aaPat = c.aaP + c.cegP; r.apec = c.apecS + c.apecP;
-    r.aaTotal = r.aa + r.apec;
-
-    // Dates
+    return r;
+  }
+  function resultatNeant(st) {
+    var inp = st.inp, C = st.contrat || {}, r = periode(st, { err: [], warn: [], info: [], c: {} }), y = r.y;
+    r.B = 0; r.neant = true; r.Bp = 0; r.csgBase = 0;
+    if (y < ANNEE_NORME) r.err.push('DSN de ' + y + ' : seule la norme ' + ANNEE_NORME + ' (' + NORME + ') est prise en charge.');
+    if (y > ANNEE_NORME) r.err.push('DSN de ' + y + ' : la norme ' + (y === 2027 ? 'P27V01' : 'de cette année') + ' n\'est pas encore prise en charge par DSNap (mise à jour prévue avant la première échéance de ' + y + ').');
+    r.atMilli = Math.round((+inp.atTaux || 0) / 10) * 10;
+    r.acre = { mode: 'aucune', zone: 'aucune', jours: r.dim, fin: null, exoPlein: 0, regime: 'ancien' };
+    r.totSal = 0; r.totPatBrut = 0; r.totPat = 0; r.net = 0; r.rnf = 0; r.pasBp = 0; r.pasType = '13'; r.pasTranche = 0; r.pas = 0; r.pasVersement = 0;
+    r.netVerse = 0; r.netApresImpot = 0; r.mns = 0; r.trPatU = 0; r.trSalU = 0; r.trNb = 0; r.trTotal = 0; r.trPat = 0; r.trSal = 0; r.netPaye = 0;
+    r.jo = joursOuvres(r.y, r.m); r.frais = computeFrais(inp); r.coutSalaire = 0; r.budget = r.frais.total; r.urssafNominatif = 0;
+    r.ctp = []; r.bordereau = 0; r.aa = 0; r.aaPat = 0; r.apec = 0; r.aaTotal = 0;
     r.dv = parseISO(inp.dateVersement); r.dc = parseISO(inp.dateConstitution) || r.dv;
     if (!r.dv) r.err.push('Date de versement invalide.');
     var dDeb = parseDMY(C['S21.G00.40.001']);
     r.anciennete = dDeb ? dnum(r.fin) - dnum(dDeb) : null;
-    if (r.anciennete !== null && r.anciennete < 1) r.anciennete = null; // CSL [0-9]* et valeur nulle interdite
-
-    // Sorties de trésorerie (virements)
+    if (r.anciennete !== null && r.anciennete < 1) r.anciennete = null;
     r.virements = [];
-    if (B > 0) {
-      r.virements.push({ qui: 'Vous (compte personnel)', quoi: 'Salaire net', montant: r.netPaye, quand: fr(r.dv), detail: 'Net après impôt ' + eur(r.netApresImpot) + ' − part salariale des titres-restaurant ' + eur(r.trSal) });
-    }
-    if (r.frais.total > 0) r.virements.push({ qui: 'Vous (compte personnel)', quoi: 'Remboursement de frais (note de frais)', montant: r.frais.total, quand: fr(r.dv), detail: 'Sur justificatifs : quittance, factures' });
-    if (r.trTotal > 0) r.virements.push({ qui: 'Émetteur des titres-restaurant', quoi: r.trNb + ' titres × ' + eur(fac), montant: r.trTotal, quand: fr(r.dv), detail: 'Dont ' + eur(r.trPat) + ' à la charge de la société et ' + eur(r.trSal) + ' retenus sur votre salaire' });
-    var ech = { y: m === 12 ? y + 1 : y, m: m === 12 ? 1 : m + 1, d: 15 };
-    r.echeance = ech;
-    if (r.bordereau > 0) r.virements.push({ qui: 'Urssaf', quoi: 'Cotisations du mois (bordereau DSN)', montant: r.bordereau, quand: 'au plus tard le ' + fr(ech), detail: 'Télépaiement sur votre espace Urssaf / net-entreprises (paiement hors DSN : pas de bloc Versement)' });
-    if (r.aaTotal > 0) r.virements.push({ qui: 'Caisse Agirc-Arrco', quoi: 'Retraite complémentaire + Apec', montant: r.aaTotal, quand: 'selon l\'échéancier de votre caisse', detail: 'Agirc-Arrco ' + eur(r.aa) + ' + Apec ' + eur(r.apec) });
-    if (r.pas > 0) r.virements.push({ qui: 'DGFiP', quoi: 'Prélèvement à la source retenu sur votre salaire', montant: r.pasVersement, quand: 'prélevé sur le compte de la société après la DSN', detail: 'Bloc Versement DGFiP de la DSN : ' + eur(r.pas) + ' arrondis à l\'euro' });
-    r.sorties = r.virements.reduce(function (s, v) { return s + v.montant; }, 0);
+    r.echeance = { y: r.m === 12 ? r.y + 1 : r.y, m: r.m === 12 ? 1 : r.m + 1, d: 15 };
+    r.sorties = 0;
     return r;
   }
-
-  /* ---------- 9. Bulletin (lignes avec formules) ---------- */
-  function bulletin(r) {
-    var c = r.c, L = [];
-    function row(o) { L.push(o); }
-    var b = eur(r.B), bp = eur(r.Bp);
-    row({ g: 'brut', lab: 'Rémunération du mandat (salaire de base)', base: '', ms: null, mp: null, calc: 'Saisi : brut mensuel', brut: r.B });
-    row({ g: 'sante', lab: 'Assurance maladie', base: b, tp: P.mal, mp: c.mal, calc: b + ' × 7,00 %', dsn: '075' });
-    row({ g: 'sante', lab: 'Complément maladie (taux plein)', base: b, tp: P.malC, mp: c.malC, calc: b + ' × 6,00 % — mandataire : pas de taux réduit', dsn: '907' });
-    row({ g: 'sante', lab: 'Accident du travail', base: b, tp: r.atMilli, mp: c.at, calc: b + ' × ' + pct(r.atMilli) + ' (taux AT saisi)', dsn: '045' });
-    row({ g: 'sante', lab: 'Contribution solidarité autonomie', base: b, tp: P.csa, mp: c.csa, calc: b + ' × 0,30 %', dsn: '068' });
-    row({ g: 'retraite', lab: 'Vieillesse plafonnée', base: bp, ts: P.vpS, ms: c.vpS, tp: P.vpP, mp: c.vpP, calc: 'base plafonnée ' + bp + ' (≤ ' + eur(P.pmss) + ') × 6,90 % et × 8,55 %', dsn: '076 (02)' });
-    row({ g: 'retraite', lab: 'Vieillesse déplafonnée', base: b, ts: P.vdS, ms: c.vdS, tp: P.vdP, mp: c.vdP, calc: b + ' × 0,40 % et × 2,11 %', dsn: '076 (03)' });
-    row({ g: 'retraite', lab: 'Retraite complémentaire Agirc-Arrco T1', base: bp, ts: P.aaS, ms: c.aaS, tp: P.aaP, mp: c.aaP, calc: bp + ' × 3,15 % et × 4,72 %', dsn: '131 / 142' });
-    row({ g: 'retraite', lab: 'Contribution d\'équilibre général T1', base: bp, ts: P.cegS, ms: c.cegS, tp: P.cegP, mp: c.cegP, calc: bp + ' × 0,86 % et × 1,29 %', dsn: '131 / 142' });
-    row({ g: 'retraite', lab: 'Apec (cadre)', base: b, ts: P.apecS, ms: c.apecS, tp: P.apecP, mp: c.apecP, calc: b + ' × 0,024 % et × 0,036 %', dsn: '132' });
-    row({ g: 'famille', lab: 'Allocations familiales', base: b, tp: P.af, mp: c.af, calc: b + ' × 3,45 %', dsn: '074' });
-    row({ g: 'famille', lab: 'Complément allocations familiales (taux plein)', base: b, tp: P.afC, mp: c.afC, calc: b + ' × 1,80 % — mandataire : pas de taux réduit', dsn: '102' });
-    if (c.exo > 0) {
-      var txt = r.acre.zone === 'totale' ? b + ' × 36,21 %' + (r.acre.regime === '2026' ? ' × 25 %' : '') + ' = ' + eur(c.exo) : 'zone dégressive : 3 × 36,21 % × (' + eur(P.pmss) + ' − ' + b + ')' + (r.acre.regime === '2026' ? ' × 25 %' : '');
-      if (r.acre.mode === 'prorata') txt += ' × ' + r.acre.jours + '/' + r.dim + ' j';
-      row({ g: 'exo', lab: 'Exonération ACRE', base: b, ms: -c.exoS, mp: -c.exoP, calc: txt + ' — part salariale = vieillesse salariale ' + eur(c.exoS), dsn: '011' });
-    }
-    row({ g: 'autres', lab: 'FNAL', base: bp, tp: P.fnal, mp: c.fnal, calc: bp + ' × 0,10 %', dsn: '049' });
-    row({ g: 'autres', lab: 'Contribution au dialogue social', base: b, tp: P.dial, mp: c.dial, calc: b + ' × 0,016 %', dsn: '100' });
-    row({ g: 'autres', lab: 'Formation professionnelle', base: b, tp: P.cfp, mp: c.cfp, calc: b + ' × 0,55 %', dsn: '128' });
-    row({ g: 'autres', lab: 'Taxe d\'apprentissage', base: b, tp: P.ta, mp: c.ta, calc: b + ' × 0,59 %', dsn: '130' });
-    var cb = eur(r.csgBase);
-    row({ g: 'csg', lab: 'CSG déductible', base: cb, ts: P.csgDed, ms: c.csgDed, calc: 'assiette ' + b + ' × 98,25 % = ' + cb + ' ; × 6,80 %', dsn: '072' });
-    row({ g: 'csg', lab: 'CSG non déductible', base: cb, ts: P.csgNd, ms: c.csgNd, calc: cb + ' × 2,40 %', dsn: '072' });
-    row({ g: 'csg', lab: 'CRDS', base: cb, ts: P.crds, ms: c.crds, calc: cb + ' × 0,50 %', dsn: '079' });
-    return L;
+  /* Ce qui part au serveur pour une paie avec salaire : le calcul, jamais l'identité. Liste fermée, testée. */
+  var CHAMPS_CALCUL = ['mois', 'brut', 'dateVersement', 'dateConstitution', 'acreMode', 'acreFin', 'acreRegime', 'pasMode', 'pasTaux', 'atTaux',
+    'trNb', 'trFaciale', 'trPartPat', 'loyer', 'elec', 'box', 'mobile', 'assurance', 'surfTotale', 'surfBureau', 'usagePro', 'usageBox', 'usageMobile', 'budgetCible'];
+  var RUBRIQUES_CALCUL = ['S21.G00.40.001', 'S21.G00.40.007', 'S21.G00.40.016'];
+  function entreesCalcul(st) {
+    var inp = {}, contrat = {}, H = st.hdr || {}, cp = String(H['S21.G00.11.004'] || H['S21.G00.06.005'] || '');
+    CHAMPS_CALCUL.forEach(function (k) { if (st.inp[k] !== undefined) inp[k] = st.inp[k]; });
+    RUBRIQUES_CALCUL.forEach(function (k) { if (st.contrat && st.contrat[k] !== undefined) contrat[k] = st.contrat[k]; });
+    return { inp: inp, contrat: contrat, departement: cp.slice(0, 2) };
   }
 
   /* ---------- 10. Génération de la DSN ---------- */
   function buildDSN(st, r) {
-    var inp = st.inp, H = st.hdr || {}, Cm = st.contrat || {}, I = st.indiv || {}, Ct = st.contact || {}, Bk = st.bank || {}, c = r.c, AR = 'A RENSEIGNER';
+    var inp = st.inp, H = st.hdr || {}, Cm = st.contrat || {}, I = st.indiv || {}, Ct = st.contact || {}, Bk = st.bank || {}, c = r.c, AR = 'A RENSEIGNER', T = r.taux || {};
     var out = [];
     function add(code, v, k, o) {
       if (v === undefined || v === null) return;
@@ -544,27 +380,27 @@ var Engine = (function () {
         add('S21.G00.81.004', dsnAmt(montant), 'calcul', o);
         if (taux !== null) add('S21.G00.81.007', dsnRate(taux, 3), 'calcul', 'Taux ' + pct(taux));
       }
-      base('02', r.Bp, 'Brut plafonné au PMSS (' + eur(P.pmss) + ')');
-      cot('049', r.Bp, c.fnal, P.fnal, 'FNAL ' + eur(r.Bp) + ' × 0,10 %');
-      cot('076', r.Bp, c.vpS + c.vpP, P.vpS + P.vpP, 'Vieillesse plafonnée : salarié ' + eur(c.vpS) + ' + employeur ' + eur(c.vpP));
+      base('02', r.Bp, 'Brut plafonné au PMSS (' + eur(T.pmss) + ')');
+      cot('049', r.Bp, c.fnal, T.fnal, 'FNAL ' + eur(r.Bp) + ' × ' + pct(T.fnal));
+      cot('076', r.Bp, c.vpS + c.vpP, T.vpS + T.vpP, 'Vieillesse plafonnée : salarié ' + eur(c.vpS) + ' + employeur ' + eur(c.vpP));
       cot('131', null, r.aa, null, 'Agirc-Arrco + CEG, salarié ' + eur(c.aaS + c.cegS) + ' + employeur ' + eur(r.aaPat));
       cot('142', null, r.aaPat, null, 'Part patronale Agirc-Arrco T1 + CEG : ' + eur(c.aaP) + ' + ' + eur(c.cegP));
       base('03', r.B, 'Brut total');
       if (c.exo > 0) cot('011', r.B, -c.exo, null, 'Exonération ACRE, montant négatif (niveau individuel)');
       cot('045', r.B, c.at, r.atMilli, 'Accident du travail : ' + eur(r.B) + ' × ' + pct(r.atMilli));
-      cot('068', r.B, c.csa, P.csa, 'CSA ' + eur(r.B) + ' × 0,30 %');
-      cot('074', r.B, c.af, P.af, 'AF ' + eur(r.B) + ' × 3,45 %');
-      cot('075', r.B, c.mal, P.mal, 'Maladie ' + eur(r.B) + ' × 7,00 %');
-      cot('076', r.B, c.vdS + c.vdP, P.vdS + P.vdP, 'Vieillesse déplafonnée : salarié ' + eur(c.vdS) + ' + employeur ' + eur(c.vdP));
-      cot('100', r.B, c.dial, P.dial, 'Dialogue social ' + eur(r.B) + ' × 0,016 %');
-      cot('102', r.B, c.afC, P.afC, 'Complément AF ' + eur(r.B) + ' × 1,80 %');
-      cot('128', r.B, c.cfp, P.cfp, 'CFP ' + eur(r.B) + ' × 0,55 %');
-      cot('130', r.B, c.ta, P.ta, 'Taxe d\'apprentissage ' + eur(r.B) + ' × 0,59 %');
+      cot('068', r.B, c.csa, T.csa, 'CSA ' + eur(r.B) + ' × ' + pct(T.csa));
+      cot('074', r.B, c.af, T.af, 'AF ' + eur(r.B) + ' × ' + pct(T.af));
+      cot('075', r.B, c.mal, T.mal, 'Maladie ' + eur(r.B) + ' × ' + pct(T.mal));
+      cot('076', r.B, c.vdS + c.vdP, T.vdS + T.vdP, 'Vieillesse déplafonnée : salarié ' + eur(c.vdS) + ' + employeur ' + eur(c.vdP));
+      cot('100', r.B, c.dial, T.dial, 'Dialogue social ' + eur(r.B) + ' × ' + pct(T.dial));
+      cot('102', r.B, c.afC, T.afC, 'Complément AF ' + eur(r.B) + ' × ' + pct(T.afC));
+      cot('128', r.B, c.cfp, T.cfp, 'CFP ' + eur(r.B) + ' × ' + pct(T.cfp));
+      cot('130', r.B, c.ta, T.ta, 'Taxe d\'apprentissage ' + eur(r.B) + ' × ' + pct(T.ta));
       cot('132', null, r.apec, null, 'Apec salarié ' + eur(c.apecS) + ' + employeur ' + eur(c.apecP));
-      cot('907', r.B, c.malC, P.malC, 'Complément maladie ' + eur(r.B) + ' × 6,00 %');
-      base('04', r.csgBase, 'Assiette CSG/CRDS = ' + eur(r.B) + ' × 98,25 %');
-      cot('072', r.csgBase, c.csgDed + c.csgNd, P.csgDed + P.csgNd, 'CSG déductible ' + eur(c.csgDed) + ' + non déductible ' + eur(c.csgNd));
-      cot('079', r.csgBase, c.crds, P.crds, 'CRDS ' + eur(r.csgBase) + ' × 0,50 %');
+      cot('907', r.B, c.malC, T.malC, 'Complément maladie ' + eur(r.B) + ' × ' + pct(T.malC));
+      base('04', r.csgBase, 'Assiette CSG/CRDS = ' + eur(r.B) + ' × ' + pct(T.csgAssiette));
+      cot('072', r.csgBase, c.csgDed + c.csgNd, T.csgDed + T.csgNd, 'CSG déductible ' + eur(c.csgDed) + ' + non déductible ' + eur(c.csgNd));
+      cot('079', r.csgBase, c.crds, T.crds, 'CRDS ' + eur(r.csgBase) + ' × ' + pct(T.crds));
       if (r.anciennete !== null) {
         add('S21.G00.86.001', '07', 'norme', "Ancienneté dans l'entreprise");
         add('S21.G00.86.002', '01', 'norme', 'En jours');
@@ -872,21 +708,6 @@ var Engine = (function () {
 
     // --- Recalcul des montants
     if (!neant && b23.length && b22.length) {
-      var RATES = { '027/920': P.dial, '260/920': P.csgDed + P.csgNd + P.crds, '332/921': P.fnal, '863/921': P.vpS + P.vpP, '959/920': P.cfp, '992/920': P.ta };
-      var tot = 0, det2 = [], inconnus = [];
-      b23.forEach(function (b) {
-        var code = get(b, '001'), q = get(b, '002'), k2 = code + '/' + q, a = get(b, '004') ? amt(get(b, '004')) : null, mtt = get(b, '005') ? amt(get(b, '005')) : null;
-        if (code === '401') { var d = toEuro(mtt || 0); tot -= d; det2.push('401 : − ' + eur(d)); return; }
-        var rate = RATES[k2];
-        if (k2 === '863/920') rate = P.mal + P.malC + P.af + P.afC + P.vdS + P.vdP + P.csa + Math.round(parseFloat(get(b, '003') || '0') * 1000);
-        if (rate === undefined || a === null) { inconnus.push(k2); return; }
-        var du = toEuro(pm(toEuro(a), rate)); tot += du; det2.push(k2 + ' : ' + eur(toEuro(a)) + ' × ' + pct(rate) + ' → ' + eur(du));
-      });
-      var decl = amt(get(b22[0], '005'));
-      var ecart = decl - tot;
-      C(M, inconnus.length ? 'info' : (ecart === 0 ? 'ok' : (Math.abs(ecart) <= 100 ? 'warn' : 'err')),
-        'Bordereau Urssaf recalculé CTP par CTP, arrondis à l\'euro : ' + eur(tot) + ' — déclaré ' + eur(decl) + (ecart ? ' (écart ' + eur(ecart) + ')' : ''),
-        det2.join(' · ') + (inconnus.length ? ' · CTP non recalculés : ' + inconnus.join(', ') : '') + (ecart ? ' — un écart entre montant déclaré et montant recalculé fait l\'objet du compte rendu Urssaf BA-209-09.' : ''), 'Guide Urssaf §1.6 et §8.1');
       // Assiettes 23 vs bases 78
       var b78 = {}; bl.forEach(function (b) { if (b.id === 'S21.G00.78') b78[get(b, '001')] = (b78[get(b, '001')] || 0) + amt(get(b, '004')); });
       var chk = [];
@@ -900,27 +721,10 @@ var Engine = (function () {
       C(M, badA.length ? 'warn' : 'ok', 'Assiettes des CTP cohérentes avec les bases individuelles (bloc 78)', badA.map(function (x) { return x.k + ' : ' + eur(x.a) + ' vs base ' + eur(x.ref); }).join(' · ') || chk.map(function (x) { return x.k + ' ≈ ' + eur(x.ref); }).join(' · '), 'Guide Urssaf §1.1');
     }
     if (!neant) {
-      // Cotisations individuelles recalculées depuis les bases 78
-      var R81 = { '049': P.fnal, '076/02': P.vpS + P.vpP, '076/03': P.vdS + P.vdP, '068': P.csa, '074': P.af, '075': P.mal, '100': P.dial, '102': P.afC, '128': P.cfp, '130': P.ta, '907': P.malC };
-      var ctx2 = '', base78 = {}, bad81 = [], nb81 = 0;
-      bl.forEach(function (b) {
-        if (b.id === 'S21.G00.78') { ctx2 = get(b, '001'); base78[ctx2] = amt(get(b, '004')); }
-        if (b.id === 'S21.G00.81') {
-          var code = get(b, '001'), rate = R81[code + '/' + ctx2] !== undefined ? R81[code + '/' + ctx2] : R81[code];
-          if (rate === undefined) return;
-          var att2 = pm(base78[ctx2] || 0, rate), dec = amt(get(b, '004')); nb81++;
-          if (Math.abs(att2 - dec) > 1) bad81.push(code + ' : ' + eur(dec) + ' au lieu de ' + eur(att2));
-        }
-      });
-      if (nb81) C(M, bad81.length ? 'warn' : 'ok', 'Cotisations individuelles = base × taux 2026 (' + nb81 + ' codes vérifiés)', bad81.join(' · '), '');
+      var base78 = {}; (function () { var x = ''; bl.forEach(function (b) { if (b.id === 'S21.G00.78') { x = get(b, '001'); base78[x] = amt(get(b, '004')); } }); })();
       var b50b = bl.filter(function (b) { return b.id === 'S21.G00.50'; })[0];
       if (b50b && base78['04'] !== undefined) {
-        var csgNd = pm(base78['04'], P.csgNd), crds = 0;
-        var ctx3 = ''; bl.forEach(function (b) { if (b.id === 'S21.G00.78') ctx3 = get(b, '001'); if (b.id === 'S21.G00.81' && ctx3 === '04' && get(b, '001') === '079') crds = amt(get(b, '004')); });
-        var net = amt(get(b50b, '004')), pas = amt(get(b50b, '009') || '0'), rnf = amt(get(b50b, '002'));
-        var att3 = net + csgNd + crds;
-        C(M, att3 === rnf ? 'ok' : 'warn', 'Net imposable ' + eur(rnf) + (att3 === rnf ? ' = ' : ' ≠ ') + 'net versé ' + eur(net) + ' + CSG non déd. ' + eur(csgNd) + ' + CRDS ' + eur(crds), att3 === rnf ? 'Le PAS n\'est pas déduit du net versé.' : 'Attendu ' + eur(att3) + ' (le PAS ne doit pas être déduit du net versé ; sans avantage ni IJ).', 'CT S21.G00.50.004');
-        void pas;
+        var net = amt(get(b50b, '004'));
         var mns = bl.filter(function (b) { return b.id === 'S21.G00.58' && get(b, '003') === '03'; })[0];
         if (mns) { var vm = amt(get(mns, '004')); C(M, vm === net ? 'ok' : 'warn', 'Montant net social ' + eur(vm) + (vm === net ? ' = ' : ' ≠ ') + 'net versé ' + eur(net), vm === net ? 'Aucune mutuelle, prévoyance ni avantage : les deux montants coïncident.' : '', ''); }
         var b001 = bl.filter(function (b) { return b.id === 'S21.G00.51' && get(b, '011') === '001'; })[0];
@@ -968,7 +772,7 @@ var Engine = (function () {
       if (r.trNb > 0) {
         C(Pp, 'warn', 'Titres-restaurant attribués au président', 'Pour un président sans contrat de travail et sans salarié, l\'exonération de la part patronale est contestée (la Commission nationale des titres-restaurant considère qu\'il n\'y a pas droit ; la tolérance de l\'Urssaf suppose que les salariés en bénéficient aussi). À valider avec votre expert-comptable.', '');
         var pctPat = +inp.trPartPat;
-        C(Pp, pctPat >= 50 && pctPat <= 60 && r.trPatU <= P.trPatMax ? 'ok' : 'err', 'Titres-restaurant : part patronale ' + String(pctPat).replace('.', ',') + ' % = ' + eur(r.trPatU) + ' par titre', 'Exonération si la société paie entre 50 % et 60 % du titre, dans la limite de ' + eur(P.trPatMax) + ' (2026).', '');
+        C(Pp, pctPat >= 50 && pctPat <= 60 && r.trPatU <= (r.taux || {}).trPatMax ? 'ok' : 'err', 'Titres-restaurant : part patronale ' + String(pctPat).replace('.', ',') + ' % = ' + eur(r.trPatU) + ' par titre', 'Exonération si la société paie entre 50 % et 60 % du titre, dans la limite de ' + eur((r.taux || {}).trPatMax) + ' (2026).', '');
         C(Pp, r.trNb <= r.jo.n ? 'ok' : 'warn', r.trNb + ' titre(s) pour ' + r.jo.n + ' jour(s) ouvré(s) en ' + r.label, 'Un titre par jour travaillé ; les jours de congé ou d\'absence n\'en donnent pas.', '');
       }
       if (r.frais.total > 0) {
@@ -996,11 +800,11 @@ var Engine = (function () {
   function setVersion(v) { LOGICIEL_VERSION = String(v); }
 
   return {
-    P: P, VAL: VAL, BLOCS: BLOCS, CODE81: CODE81, CTP: CTP, refValue: refValue, setVersion: setVersion,
-    rhu: rhu, pm: pm, eur: eur, pct: pct, bpPct: bpPct, dsnAmt: dsnAmt, fr: fr, iso: iso, parseISO: parseISO, parseDMY: parseDMY, moisLabel: moisLabel,
-    joursOuvres: joursOuvres, label: label, meaning: meaning, clean: clean, clone: clone,
-    defaultState: defaultState, compute: compute, bulletin: bulletin, buildDSN: buildDSN, toText: toText, toLatin1: toLatin1,
-    parseDSN: parseDSN, blocsOf: blocsOf, keyed: keyed, diff: diff, extract: extract, controls: controls, nirKey: nirKey, pasBareme: pasBareme, luhn: luhn, joursOuvresListe: joursOuvres
+    VAL: VAL, BLOCS: BLOCS, CODE81: CODE81, CTP: CTP, refValue: refValue, setVersion: setVersion,
+    rhu: rhu, pm: pm, toEuro: toEuro, amt: amt, get: get, eur: eur, pct: pct, bpPct: bpPct, dsnAmt: dsnAmt, dnum: dnum, dim: dim, fr: fr, iso: iso, parseISO: parseISO, parseDMY: parseDMY, moisLabel: moisLabel,
+    joursOuvres: joursOuvres, label: label, meaning: meaning, clean: clean, clone: clone, periode: periode, computeFrais: computeFrais,
+    defaultState: defaultState, resultatNeant: resultatNeant, entreesCalcul: entreesCalcul, buildDSN: buildDSN, toText: toText, toLatin1: toLatin1,
+    parseDSN: parseDSN, blocsOf: blocsOf, keyed: keyed, diff: diff, extract: extract, controls: controls, nirKey: nirKey, luhn: luhn, joursOuvresListe: joursOuvres
   };
 })();
-if (typeof module !== 'undefined' && module.exports) module.exports = Engine;
+if (typeof module !== 'undefined' && module.exports) module.exports = Noyau;

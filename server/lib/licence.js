@@ -4,9 +4,10 @@
  * Abonnement DSNap : vérification auprès du service de licences de DSNap.
  *
  *  - Toujours gratuit : DSN néant (préparation et dépôt réel), contrôle de fichiers, dépôts de test, suivi des
- *    retours, tables de référence, simulation d'une paie.
- *  - Essai de 7 jours, puis abonnement (6,90 €/mois ou 70 €/an) : préparation d'une paie avec salaire (DSN,
- *    bulletin, note de frais) et dépôt réel d'une DSN avec salaire.
+ *    retours, tables de référence, simulation d'une paie (aperçu).
+ *  - Essai de 7 jours, sans carte : un aperçu de la paie (brut, net, coût total), 5 fois au plus.
+ *  - Abonnement (6,90 €/mois ou 70 €/an), sans compte à créer : paie avec salaire (DSN, bulletin, note de frais), dépôt
+ *    réel d'une DSN avec salaire, 10 calculs par mois de paie.
  *
  * Données envoyées : une empreinte du SIREN (SHA-256, le SIREN lui-même ne part pas), l'identifiant d'installation
  * et la version de DSNap. La réponse est signée (Ed25519) et gardée en cache : en cas de coupure du service, la
@@ -17,10 +18,20 @@ const path = require('path');
 const crypto = require('crypto');
 const chemins = require('./chemins.js');
 
-const CLE_PUBLIQUE = process.env.DSNAP_CLE_LICENCE || '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEADyi2ScbKrJ6fWDUhg6d2YYI49UV9tG2E36pfkUIwmY4=\n-----END PUBLIC KEY-----\n';
+const CLE_OFFICIELLE = '-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEADyi2ScbKrJ6fWDUhg6d2YYI49UV9tG2E36pfkUIwmY4=\n-----END PUBLIC KEY-----\n';
+/* Banc d'essai : net-entreprises remplacé par un service local (tests, démonstration hors ligne). Seul cas où une autre
+   clé de licence (DSNAP_CLE_LICENCE) est acceptée : un faux service de licences ne débloque alors que des dépôts vers
+   ce faux net-entreprises, jamais vers le vrai. DSNAP_API reste réglable : sans la clé privée de cerfaless.fr, une autre
+   adresse ne peut rien signer. */
+function bancEssai() {
+  const local = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?\//;
+  return local.test(process.env.NE_URL_AUTH || '') && local.test(process.env.NE_URL_DEPOT || '');
+}
+const CLE_PUBLIQUE = process.env.DSNAP_CLE_LICENCE && bancEssai() ? process.env.DSNAP_CLE_LICENCE : CLE_OFFICIELLE;
 const APIS = (process.env.DSNAP_API || 'https://cerfaless.fr/api/dsnap').split(',').map(function (s) { return s.trim().replace(/\/+$/, ''); }).filter(Boolean);
 const SITE = process.env.DSNAP_SITE || 'https://cerfaless.fr/dsnap';
 const DELAI = 8000;
+const HEURE = 3600000;
 const STATUTS_OK = ['actif', 'essai', 'lancement', 'demo'];
 
 function empreinteSiren(siren) { return crypto.createHash('sha256').update('dsnap|' + String(siren).replace(/\s/g, '')).digest('hex'); }
@@ -90,7 +101,7 @@ async function statut(siren, o) {
     let info = null;
     if (j.jeton) info = verifierJeton(j.jeton, hash);
     if (j.jeton && !info) throw Object.assign(new Error('réponse du service de licences non authentifiée'), { horsLigne: true });
-    if (info) { cache[hash] = { jeton: j.jeton, verifieLe: new Date().toISOString() }; ecrireCache(cache); }
+    if (info) { cache[hash] = { jeton: j.jeton, verifieLe: new Date(maintenant).toISOString(), vu: Math.max(maintenant, (cache[hash] && cache[hash].vu) || 0) }; ecrireCache(cache); }
     // seule une réponse signée peut autoriser une action payante ; une réponse non signée ne vaut qu'information
     const st = info ? info.st : (j.statut === 'nouveau' ? 'nouveau' : 'inconnu');
     const fin = info ? info.fin : null;
@@ -104,7 +115,12 @@ async function statut(siren, o) {
     if (!e.horsLigne) throw e;
     const c = cache[hash];
     const info = c ? verifierJeton(c.jeton, hash) : null;
+    // horloge du poste reculée (avant l'émission du jeton, ou avant son dernier usage) : le jeton en cache ne vaut plus,
+    // sinon il resterait valable sans fin. Tolérance d'une heure (changement d'heure, petite dérive).
+    const recul = info && (Date.parse(info.emis || c.verifieLe) - maintenant > HEURE || ((c.vu || 0) - maintenant > HEURE));
+    if (recul) return { statut: 'injoignable', autorise: false, horsLigne: true, liens: liens(hash), message: 'Impossible de vérifier l\'abonnement : le service de licences est injoignable et l\'horloge de cet ordinateur est en retard sur la dernière vérification. Remettez l\'ordinateur à l\'heure, puis réessayez. Les DSN néant, les contrôles et les dépôts de test restent disponibles.' };
     if (info && STATUTS_OK.indexOf(info.st) >= 0 && Date.parse(info.fin) > maintenant) {
+      c.vu = Math.max(maintenant, c.vu || 0); ecrireCache(cache);
       return { statut: info.st, autorise: true, horsLigne: true, fin: info.fin, plan: info.plan || null, finEssai: info.essaiFin || null, liens: liens(hash), message: message(info.st, info.fin, info.essaiFin) + ' (vérifié le ' + new Date(c.verifieLe).toLocaleDateString('fr-FR') + ', service de licences injoignable aujourd\'hui)' };
     }
     return { statut: 'injoignable', autorise: false, horsLigne: true, liens: liens(hash), message: 'Impossible de vérifier l\'abonnement : ' + e.message + '. Réessayez dans quelques minutes. Les DSN néant, les contrôles et les dépôts de test restent disponibles ; le fichier DSN peut aussi être déposé à la main sur net-entreprises.fr.' };
@@ -124,4 +140,7 @@ function message(st, fin, essaiFin) {
 /** Autorisation d'une action payante : renvoie le statut ; autorise = false si l'abonnement manque. */
 async function autoriser(siren, o) { return statut(siren, Object.assign({}, o, { demarrer: true })); }
 
-module.exports = { statut, autoriser, empreinteSiren, verifierJeton, liens, APIS, SITE };
+/** Dernier jeton signé pour ce SIREN : sert de preuve au serveur de calcul si Stripe est en panne. */
+function jetonEnCache(siren) { const c = lireCache()[empreinteSiren(siren)]; return c ? c.jeton : null; }
+
+module.exports = { statut, autoriser, empreinteSiren, verifierJeton, jetonEnCache, liens, APIS, SITE };

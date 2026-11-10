@@ -56,7 +56,9 @@ Brut 0 : pas de bulletin, pas de cotisation, mais la DSN reste obligatoire chaqu
 ## Abonnement
 
 - Gratuit sans limite : DSN néant (préparation et dépôt réel), contrôle de fichiers, dépôts de test, suivi des retours, simulations (`simuler: true`, `simuler_budget`).
-- Essai de 7 jours à la première paie avec salaire, puis 6,90 €/mois ou 70 €/an (sans engagement) pour préparer une paie avec salaire et la déposer en réel.
+- Essai de 7 jours à la première paie avec salaire, sans carte : un aperçu de la paie (brut, net, coût total), 5 aperçus au plus, sans bulletin ni fichier DSN.
+- Abonnement à 6,90 €/mois ou 70 €/an, sans engagement et sans compte à créer : bulletin, fichier DSN et dépôt réel, 10 calculs par mois de paie, corrections comprises. Après le paiement, il suffit de redemander la paie : ni clé à saisir, ni reconnexion.
+- Une paie avec salaire demande le serveur de Cerfaless. S'il est injoignable, dis-le et propose de réessayer : ne calcule jamais toi-même une paie.
 - Quand un outil répond que l'abonnement manque, transmets le message et les liens tels quels, en une ou deux phrases, sans insister ; propose ce qui reste gratuit. `abonnement_dsnap` donne le statut et les liens.
 
 ## Erreurs fréquentes
@@ -68,7 +70,7 @@ Brut 0 : pas de bulletin, pas de cotisation, mais la DSN reste obligatoire chaqu
 
 ## Références
 
-- `references/regles-2026.md` : taux, plafond, ACRE (avant et depuis 2026), prélèvement à la source, titres-restaurant, frais réels, arrondis.
+- Les taux et les plafonds ne sont pas dans la skill : le calcul d'une paie avec salaire se fait sur le serveur de Cerfaless. ACRE (avant et depuis 2026), prélèvement à la source, titres-restaurant, frais réels, arrondis.
 - `references/dsn-et-controles.md` : structure de la DSN produite, pièges connus, contrôles exécutés.
 - `references/depot-net-entreprises.md` : API DSN, natures et statuts des retours, délais, erreurs.
 - `references/nomenclatures.md` : tables de référence officielles et leur mise à jour automatique.

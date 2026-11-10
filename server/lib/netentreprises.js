@@ -121,6 +121,11 @@ function verifierFlux(buf, siretCompte) {
     compte[m[1]] = (compte[m[1]] || 0) + 1;
   });
   if (!/^S10\.G00\.00\.001,/.test(lignes[0] || '')) erreurs.push('Le fichier ne commence pas par S10.G00.00.001.');
+  // nature test/réel, mois, norme et SIRET sont lus à leur première occurrence, mais le fichier part tel quel : chacune
+  // doit être unique, sinon net-entreprises pourrait en retenir une autre que celle contrôlée ici
+  ['S10.G00.00.001', 'S10.G00.00.005', 'S10.G00.00.006', 'S20.G00.05.002', 'S20.G00.05.005', 'S21.G00.06.001', 'S21.G00.11.001'].forEach(function (r) {
+    if ((compte[r] || 0) > 1) erreurs.push('La rubrique ' + r + ' apparaît ' + compte[r] + ' fois : une seule occurrence est admise dans un dépôt.');
+  });
   if ((compte['S20.G00.05.001'] || 0) !== 1) erreurs.push('Le dépôt doit contenir exactement une déclaration (un seul bloc S20) ; trouvé : ' + (compte['S20.G00.05.001'] || 0) + '.');
   if (String(lignes.length) !== val['S90.G00.90.001']) erreurs.push('S90.G00.90.001 vaut ' + val['S90.G00.90.001'] + ' alors que le fichier compte ' + lignes.length + ' lignes.');
   const essai = val['S10.G00.00.005'];
@@ -174,7 +179,8 @@ function analyserRetours(texte) {
 }
 function depotsDeReponse(texte) {
   let j = null; try { j = JSON.parse(texte); } catch (e) { j = null; }
-  return j && j.depots ? enListe(j.depots.declarant).reduce(function (acc, dcl) { return acc.concat(enListe(dcl.depot)); }, []) : [];
+  // le SIRET du bloc déclarant est gardé sur chaque dépôt : il sert à rattacher un envoi incertain à son flux
+  return j && j.depots ? enListe(j.depots.declarant).reduce(function (acc, dcl) { return acc.concat(enListe(dcl.depot).map(function (x) { return x && dcl.siret && !x.siret ? Object.assign({}, x, { siret: dcl.siret }) : x; })); }, []) : [];
 }
 
 /* ------------------------------------------------------------------ client */
