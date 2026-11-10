@@ -1,0 +1,15 @@
+{
+  "name": "@cerfaless/dsnap",
+  "version": "1.1.0",
+  "description": "Serveur MCP local : paie et DSN du président de SASU, dépôt sur net-entreprises. DSN néant gratuite.",
+  "homepage": "https://cerfaless.fr/dsnap",
+  "repository": { "type": "git", "url": "git+https://github.com/64Etienne/cerfaless-dsnap.git" },
+  "bugs": "https://cerfaless.fr/contact",
+  "author": "SASU EBO (Cerfaless) <contact@cerfaless.fr>",
+  "license": "SEE LICENSE IN LICENSE",
+  "keywords": ["mcp", "dsn", "paie", "net-entreprises", "urssaf", "sasu"],
+  "bin": { "dsnap": "server/index.js" },
+  "files": ["server/", "!server/nomenclatures/", "skills/", "README.md", "LICENSE", "PRIVACY.md", "CHANGELOG.md"],
+  "engines": { "node": ">=18" },
+  "publishConfig": { "access": "public" }
+}

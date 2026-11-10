@@ -16,9 +16,10 @@ const demo = require('./demo.js');
 const paie = require('./paie.js');
 const tables = require('./tables.js');
 const licence = require('./licence.js');
+const calcul = require('./calcul.js');
 const configuration = require('./configuration.js');
 const { masqueur, nirsDuTexte, masquerNirGenerique } = require('./confidentialite.js');
-const E = require('./engine.js');
+const E = require('./noyau.js');
 
 E.setVersion(VERSION);
 const ENV = process.env;
@@ -42,10 +43,18 @@ async function identifiants() {
   return s || identifiantsExtension();
 }
 let clientCache = null, clientDemo = null;
-// identifiants refusés : empreintes gardées dans les réglages, partagées entre processus, effacées quand on en saisit d'autres
+// identifiants refusés : empreintes gardées dans les réglages, partagées entre processus, effacées quand on en saisit d'autres.
+// Sur le disque, l'empreinte passe par scrypt (coûteux, salé par l'installation) : qui lit reglages.json ne peut pas
+// tester des mots de passe à grande vitesse. Une empreinte d'une version précédente (SHA-256 seul) est convertie.
+function empreinteStockee(e) { return 's1:' + crypto.scryptSync(e, 'dsnap-refus:' + chemins.lireReglages().installation, 32, { N: 1 << 15, r: 8, p: 1, maxmem: 64 * 1024 * 1024 }).toString('hex'); }
 const REFUS = {
-  contient: function (e) { const r = chemins.lireReglages().identifiantsRefuses; return Array.isArray(r) && r.indexOf(e) >= 0; },
-  ajouter: function (e) { const r = chemins.lireReglages().identifiantsRefuses; chemins.modifierReglages({ identifiantsRefuses: (Array.isArray(r) ? r : []).concat([e]).slice(-10) }); }
+  contient: function (e) {
+    const r = chemins.lireReglages().identifiantsRefuses;
+    if (!Array.isArray(r) || !r.length) return false;
+    if (r.indexOf(e) >= 0) { const s = empreinteStockee(e); chemins.modifierReglages({ identifiantsRefuses: r.map(function (x) { return x === e ? s : x; }) }); return true; }
+    return r.indexOf(empreinteStockee(e)) >= 0;
+  },
+  ajouter: function (e) { const r = chemins.lireReglages().identifiantsRefuses; chemins.modifierReglages({ identifiantsRefuses: (Array.isArray(r) ? r : []).concat([empreinteStockee(e)]).slice(-10) }); }
 };
 function client() {
   const d = modeDemo();
@@ -105,6 +114,9 @@ function libMois(mois) { const m = /^(\d{4})-(\d{2})$/.exec(mois || ''); return 
 function pad2(n) { return (n < 10 ? '0' : '') + n; }
 function horodatage(d) { d = d || new Date(); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) + ' ' + pad2(d.getHours()) + 'h' + pad2(d.getMinutes()) + 'm' + pad2(d.getSeconds()); }
 function attendre(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+/** Mois en cours à Paris, AAAA-MM. Une paie avec salaire se prépare au plus tôt dans son mois (paie de fin de mois
+ * préparée en avance, versée le 28 par exemple) : un mois à venir n'est pas encore une paie, seulement une simulation. */
+function moisEnCours() { return new Date(Date.now()).toLocaleDateString('sv-SE', { timeZone: 'Europe/Paris' }).slice(0, 7); }
 function moisPrecedent(d) { d = d || new Date(); const y = d.getMonth() === 0 ? d.getFullYear() - 1 : d.getFullYear(), m = d.getMonth() === 0 ? 12 : d.getMonth(); return y + '-' + pad2(m); }
 function texteLicence(l) {
   let t = l.message || '';
@@ -187,36 +199,61 @@ function contexteConfig() {
 async function outilConfigurer() {
   const p = await configuration.demarrer(contexteConfig());
   const ouvert = configuration.ouvrirNavigateur(p.url);
+  // le lien d'entrée (à usage unique) ouvre une session qui règle aussi le dépôt réel sans confirmation : il ne passe
+  // par le modèle que si le navigateur n'a pas pu être ouvert, pour que l'utilisateur puisse le recopier
+  const lien = ouvert ? p.url.replace(/\/c\/[^/]+\/$/, '/') : p.url;
   return {
-    texte: (ouvert ? 'La page de configuration de DSNap s\'ouvre dans le navigateur de l\'utilisateur' : 'Page de configuration prête') + ' : ' + p.url + '\n' +
+    texte: (ouvert ? 'La page de configuration de DSNap s\'ouvre dans le navigateur de l\'utilisateur (adresse : ' + lien + ' ; si l\'onglet est fermé, rappelez configurer_dsnap)' : 'Page de configuration prête : ' + lien) + '\n' +
       'Dites à l\'utilisateur de la remplir dans l\'ordre (dossier de paie, identifiants net-entreprises, société, président, choix de paie), ou d\'essayer la démonstration. ' +
       'Il y saisit ses identifiants et son numéro de sécurité sociale lui-même : ne les lui demandez jamais dans la conversation. Ensuite, appelez etat_dsnap pour vérifier.',
-    donnees: { url: p.url, ouvert: ouvert }
+    donnees: { url: lien, ouvert: ouvert }
   };
 }
 
 function verifierDemo(d, cfg) {
   if (modeDemo() && sirenDe(d, cfg) !== demo.SIREN) throw fail('Mode démonstration : seule la société fictive peut être utilisée. Quittez la démonstration dans configurer_dsnap pour travailler sur votre société.');
 }
+/** Aperçu de l'essai ou d'une simulation : brut, net avant impôt, coût total, sans bulletin ni fichier. */
+function texteApercu(r, lic) {
+  const l = [(r.simulation ? 'Simulation' : 'Aperçu de l\'essai') + ' — ' + r.libelle + ' : brut ' + eur(r.brut) + ' → net avant impôt ' + eur(r.netAvantImpot) + ' ; coût total pour la société ' + eur(r.coutTotal) + '.'];
+  if (r.erreurs && r.erreurs.length) l.push('À corriger :\n- ' + r.erreurs.join('\n- '));
+  if (!r.simulation) {
+    if (r.limite) l.push('Aperçus restants pendant l\'essai : ' + Math.max(0, r.limite - r.utilises) + ' sur ' + r.limite + '.');
+    l.push('Le bulletin de paie, le fichier DSN complet et son dépôt réel s\'ouvrent avec l\'abonnement : 6,90 € par mois ou 70 € par an, sans compte à créer.');
+    if (lic && lic.liens) l.push('S\'abonner : ' + lic.liens.mensuel + ' (mensuel) ou ' + lic.liens.annuel + ' (annuel).');
+  }
+  return { texte: l.join('\n'), donnees: r, erreur: false };
+}
+
 async function outilPreparer(a) {
   const d = dossier(), cfg = config(d);
   verifierDemo(d, cfg);
   const brut = a.brut === undefined || a.brut === null ? null : Number(a.brut);
   if (brut !== null && (!isFinite(brut) || brut < 0)) throw fail('Brut invalide : ' + a.brut);
   const simuler = a.simuler === true;
+  // un mois déjà déposé en réel (ou dont l'envoi réel est incertain) garde ses fichiers : ce sont ceux qui ont été
+  // déclarés, et les réécrire effacerait la trace de ce qui a été envoyé
+  const depose = simuler ? null : declaresEnReel(d).filter(function (e) { return e.mois === a.mois; })[0];
+  if (depose) throw fail('La DSN réelle de ' + libMois(a.mois) + ' a déjà été ' + (depose.http === 200 ? 'déposée' : 'envoyée (réponse incertaine)') + ' le ' + dateFr(depose.horodatage) + ' : DSNap ne réécrit pas ses fichiers. Pour recalculer sans rien écrire, utilisez simuler = true ; corriger une déclaration acceptée passe par une DSN « annule et remplace » sur net-entreprises.fr.');
   const avecSalaire = brut === null ? !!(cfg.automatisation && cfg.automatisation.brut && cfg.automatisation.brut.mode === 'fixe' && Number(cfg.automatisation.brut.valeur) > 0) : brut > 0;
   let lic = null;
+  if (avecSalaire && !simuler && String(a.mois) > moisEnCours()) return { texte: 'Paie avec salaire non préparée : ' + libMois(a.mois) + ' est un mois à venir. Une paie se prépare au plus tôt dans son mois (le ' + moisEnCours().slice(5) + '/' + moisEnCours().slice(0, 4) + ' en ce moment). Pour voir le résultat dès maintenant : simuler = true (aucun fichier écrit).', donnees: { mois: a.mois, moisEnCours: moisEnCours() }, erreur: true };
   if (avecSalaire && !simuler) {
     lic = await licence.autoriser(sirenDe(d, cfg), { demo: modeDemo(), version: VERSION });
     if (!lic.autorise) return { texte: 'Paie avec salaire non préparée : ' + texteLicence(lic) + '\nGratuit : simuler cette paie (simuler = true), préparer et déposer une DSN néant, contrôler un fichier.', donnees: { licence: lic }, erreur: true };
   }
   let majTables = null;
   try { majTables = await tables.siNecessaire(); } catch (e) { majTables = { message: 'Mise à jour des tables impossible : ' + e.message }; }
-  const r = paie.preparer({
+  const siren = sirenDe(d, cfg);
+  const r = await paie.preparer({
+    calculer: function (e) { return calcul.paie(siren, e, { demo: modeDemo(), version: VERSION }); }, simulation: calcul.simulation,
     dossier: d, cfg: cfg, mois: a.mois, brut: brut === null ? undefined : brut, dateVersement: a.date_versement, numero: a.numero_ordre,
     tr: a.titres_restaurant, loyer: a.loyer, elec: a.electricite, box: a.box, mobile: a.mobile, assurance: a.assurance,
-    pasTaux: a.taux_pas, pasId: a.id_taux_pas, simuler: simuler, controleurTables: tables.controleur(), version: VERSION
+    pasTaux: a.taux_pas, pasId: a.id_taux_pas, simuler: simuler, controleurTables: tables.controleur(), version: VERSION,
+    // démonstration : jamais de fichier réel (02), qui pourrait être déposé à la main avec des données modifiées
+    sansReel: modeDemo()
   });
+  if (r.apercu) return texteApercu(r, lic);
   const R = r.resultats;
   const l = [];
   l.push((simuler ? 'Simulation (aucun fichier écrit)' : (r.pret ? 'Paie prête' : 'Paie préparée AVEC ERREURS BLOQUANTES')) + ' — ' + r.libelle + ' : ' + r.type + ', numéro d\'ordre ' + r.numeroOrdre + ', à déposer au plus tard le ' + dateFr(r.echeanceDepot) + '.');
@@ -226,7 +263,7 @@ async function outilPreparer(a) {
     l.push('À payer : Urssaf ' + eur(R.bordereauUrssaf) + ' (télépaiement, échéance du ' + dateFr(r.echeanceDepot) + '), Agirc-Arrco et Apec ' + eur(R.agircArrcoApec) + ' (selon votre caisse).');
     if (r.virements.length) l.push('Virements : ' + r.virements.map(function (v) { return v.quoi + ' ' + eur(v.montant) + ' → ' + v.qui + ' (' + v.quand + ')'; }).join(' ; ') + '.');
   } else l.push('Aucune rémunération versée ce mois-ci : DSN néant, sans bulletin ni cotisation.');
-  if (r.fichiers) l.push('Fichiers (dossier de paie) : DSN de test « ' + r.fichiers.dsnTest + ' », DSN réelle « ' + r.fichiers.dsnReel + ' »' + (r.fichiers.bulletin ? ', bulletin « ' + r.fichiers.bulletin + ' »' : '') + (r.fichiers.noteFrais ? ', note de frais « ' + r.fichiers.noteFrais + ' »' : '') + '.');
+  if (r.fichiers) l.push('Fichiers (dossier de paie) : DSN de test « ' + r.fichiers.dsnTest + ' »' + (r.fichiers.dsnReel ? ', DSN réelle « ' + r.fichiers.dsnReel + ' »' : ' (démonstration : pas de DSN réelle ; le dépôt réel est simulé à partir du fichier de test)') + (r.fichiers.bulletin ? ', bulletin « ' + r.fichiers.bulletin + ' »' : '') + (r.fichiers.noteFrais ? ', note de frais « ' + r.fichiers.noteFrais + ' »' : '') + '.');
   if (r.erreurs.length) l.push('ERREURS BLOQUANTES (ne pas déposer) :\n- ' + r.erreurs.join('\n- '));
   if (r.vigilance.length) l.push('Points de vigilance :\n- ' + r.vigilance.join('\n- '));
   if (r.nomenclatures) l.push('Codes vérifiés avec les tables officielles ' + r.nomenclatures.norme + ' ' + r.nomenclatures.version + ' du ' + dateFr(r.nomenclatures.date) + '.');
@@ -238,15 +275,26 @@ async function outilPreparer(a) {
 
 async function outilBudget(a) {
   const d = dossier(), cfg = config(d);
-  const r = paie.preparer({ dossier: d, cfg: cfg, mois: a.mois, budgetMax: true, budget: a.budget, tr: a.titres_restaurant, version: VERSION });
+  const r = await paie.preparer({ simulation: calcul.simulation, dossier: d, cfg: cfg, mois: a.mois, budgetMax: true, budget: a.budget, tr: a.titres_restaurant, version: VERSION });
   if (r.brutMax === null) return { texte: r.message, donnees: r };
   return { texte: 'Pour un budget de ' + eur(r.budget) + ' en ' + libMois(a.mois) + ' : brut maximal ' + eur(r.brutMax) + ' → virement du salaire ' + eur(r.salaireVire) + ', frais remboursés ' + eur(r.fraisRembourses) + ', coût total ' + eur(r.coutTotal) + ' (ACRE : ' + r.acre + ').' + (r.plafond ? ' ' + r.plafond + '.' : '') + ' Simulation gratuite : rien n\'est écrit.', donnees: r };
 }
 
+// fichier DSN désigné par le modèle : absent, vide ou dossier = refus clair avant toute lecture (défaut du 10/11 : un fichier
+// absent devenait le dossier de paie et finissait en « Erreur interne EISDIR ») ; un fichier qui n'est pas une DSN n'est pas lu
+function fichierDsn(d, nom) {
+  if (typeof nom !== 'string' || !nom.trim()) throw fail('Paramètre fichier : indiquez le fichier DSN (« … - TEST.txt » ou « … - REEL.txt ») renvoyé par preparer_dsn.');
+  const chemin = d.dans(nom);
+  if (!fs.existsSync(chemin)) throw fail('Fichier introuvable dans le dossier de paie : ' + nom);
+  if (fs.statSync(chemin).isDirectory()) throw fail('« ' + nom + ' » n\'est pas une DSN mais un dossier : indiquez le fichier DSN (« … - TEST.txt » ou « … - REEL.txt ») renvoyé par preparer_dsn.');
+  if (!d.estDsn(chemin)) throw fail('Ce fichier n\'est pas une DSN (il doit commencer par S10.G00.00.001) : DSNap ne l\'ouvre pas.');
+  return chemin;
+}
+
 async function outilVerifier(a) {
   const d = dossier();
-  const chemin = d.dans(a.fichier);
-  if (!fs.existsSync(chemin)) throw fail('Fichier introuvable dans le dossier de paie : ' + a.fichier);
+  // un fichier qui n'est pas une DSN n'est pas lu : aucune de ses lignes ne remonte au modèle
+  const chemin = fichierDsn(d, a.fichier);
   const buf = fs.readFileSync(chemin);
   voirNirs(buf.toString('latin1'));
   const v = NE.verifierFlux(buf, await client().siretCompte());
@@ -287,40 +335,48 @@ function ecartDepot(x, instant) {
   const u = enUTC(x.date), decalageParis = enUTC(NE.dateNE(new Date(instant))) - instant;
   return Math.min(Math.abs(u - instant), Math.abs(u - decalageParis - instant));
 }
-/** Retrouve dans la liste net-entreprises le flux d'un envoi : un seul dépôt inconnu du journal, à 5 minutes près. */
-function fluxUnique(depots, journal, instant) {
+/**
+ * Candidats de la liste net-entreprises pour un envoi du journal : dépôts inconnus du journal, à 5 minutes près.
+ * proches : tous ces dépôts (s'il y en a un seul, l'envoi n'est pas « non reçu ») ;
+ * compatibles : ceux dont le SIRET du déclarant, quand la liste le donne, est celui de l'envoi.
+ * Un envoi n'est rattaché qu'à un candidat compatible unique ; plusieurs candidats = ambiguïté, jamais une absence.
+ */
+function candidatsFlux(depots, journal, entree, instant) {
   const connus = new Set(journal.map(function (e) { return e.idflux; }).filter(Boolean));
-  const c = depots.filter(function (x) { return x.idflux && !connus.has(x.idflux) && ecartDepot(x, instant) < 300000; });
-  return c.length === 1 ? c[0] : null;
+  const proches = depots.filter(function (x) { return x.idflux && !connus.has(x.idflux) && ecartDepot(x, instant) < 300000; });
+  const compatibles = proches.filter(function (x) { return !x.siret || !entree.siret || String(x.siret).trim() === String(entree.siret).trim(); });
+  return { proches: proches, compatibles: compatibles, flux: compatibles.length === 1 ? compatibles[0] : null };
 }
+function fluxUnique(depots, journal, instant, entree) { return candidatsFlux(depots, journal, entree || {}, instant).flux; }
 async function retrouverFlux(c, d, entree, instant) {
   try {
-    const x = fluxUnique(await c.depotsEntre(new Date(instant - 15 * 60000), new Date(instant + 15 * 60000)), d.lireJournal(), instant);
+    const depots = await c.depotsEntre(new Date(instant - 15 * 60000), new Date(instant + 15 * 60000));
+    // journal relu juste avant le rattachement : un flux déjà attribué à une autre entrée n'est plus candidat
+    const x = candidatsFlux(depots, d.lireJournal(), entree, instant).flux;
     if (!x) return null;
     d.majEntree(entree.id, { idflux: x.idflux, sourceFlux: 'liste des dépôts', etat: 'envoye', http: 200, statutListe: x.statut });
     return x;
   } catch (e) { return null; }
 }
 
-async function outilDeposer(a) {
+async function outilDeposer(a, ctx) {
   const mode = a.mode === 'reel' ? 'reel' : (a.mode === 'test' ? 'test' : null);
   if (!mode) throw fail('Paramètre mode : « test » ou « reel ».');
   const d = dossier();
   const liberer = d.verrouiller();
-  try { return await deposer(d, a, mode); } finally { liberer(); }
+  try { return await deposer(d, a, mode, ctx); } finally { liberer(); }
 }
-async function deposer(d, a, mode) {
+async function deposer(d, a, mode, ctx) {
   const cfg = d.lireConfig() || {};
   const masque = masqueDossier(d, cfg);
-  const chemin = d.dans(a.fichier);
-  if (!fs.existsSync(chemin)) throw fail('Fichier introuvable dans le dossier de paie : ' + a.fichier);
+  const chemin = fichierDsn(d, a.fichier);
   const buf = fs.readFileSync(chemin);
   voirNirs(buf.toString('latin1'));
   const c = client();
   const v = NE.verifierFlux(buf, await c.siretCompte());
   if (!v.ok) return { texte: 'Dépôt refusé avant envoi, le fichier n\'est pas conforme : ' + v.erreurs.join(' | '), donnees: v, erreur: true };
   if (mode === 'test' && v.essaiReel !== '01') throw fail('Ce fichier est un fichier RÉEL (S10.G00.00.005 = 02) : pour un dépôt de test, utilisez le fichier de test (01).');
-  if (mode === 'reel' && v.essaiReel !== '02') throw fail('Ce fichier est un fichier de TEST (S10.G00.00.005 = 01) : pour le dépôt réel, utilisez le fichier réel (02).');
+  if (mode === 'reel' && v.essaiReel !== '02' && !(modeDemo() && v.essaiReel === '01')) throw fail('Ce fichier est un fichier de TEST (S10.G00.00.005 = 01) : pour le dépôt réel, utilisez le fichier réel (02).');
   if (modeDemo() && v.siren !== demo.SIREN) throw fail('Mode démonstration : seuls les fichiers de la société fictive peuvent être déposés (au simulateur). Quittez la démonstration dans configurer_dsnap pour déposer vos vraies DSN.');
   const contenu = paie.controlerFichier(buf, { controleurTables: tables.controleur() });
   if (!contenu.pret && mode === 'reel') return { texte: 'Dépôt réel refusé avant envoi : le contrôle du contenu signale des erreurs bloquantes :\n- ' + contenu.erreurs.join('\n- '), donnees: { contenu: contenu }, erreur: true };
@@ -333,7 +389,10 @@ async function deposer(d, a, mode) {
     if (meme.length) throw fail('Cette déclaration a déjà été déposée en réel le ' + dateFr(meme[0].horodatage) + ' (flux ' + meme[0].idflux + ') : un second dépôt créerait un doublon.');
     const moisDeclare = journal.filter(function (e) { return e.mode === 'reel' && e.mois === v.mois && e.siret === v.siret && e.http === 200 && !/KO/i.test(e.bilan || ''); });
     if (moisDeclare.length) throw fail('Une DSN réelle de ' + libMois(v.mois) + ' a déjà été déposée pour ce SIRET le ' + dateFr(moisDeclare[0].horodatage) + ' (flux ' + moisDeclare[0].idflux + ', bilan ' + (moisDeclare[0].bilan || '?') + '). Une seconde DSN normale du même mois est un doublon (anomalie B1-208-09) ; corriger une déclaration acceptée passe par une DSN « annule et remplace », que DSNap ne produit pas encore : déposez-la sur net-entreprises.fr ou voyez votre expert-comptable.');
-    if (!reelSansConfirmation(d) && a.confirmation_utilisateur !== true) throw fail('Dépôt réel refusé : il faut la confirmation explicite de l\'utilisateur dans la conversation (confirmation_utilisateur = true), donnée juste avant ce dépôt.');
+    // avec un client qui sait interroger l'utilisateur (elicitation MCP), c'est lui qui confirme, plus bas, dans une
+    // fenêtre de son application : confirmation_utilisateur, affirmée par le modèle, ne sert qu'aux autres clients
+    const eliciter = reelSansConfirmation(d) ? null : (ctx && ctx.eliciter) || null;
+    if (!reelSansConfirmation(d) && !eliciter && a.confirmation_utilisateur !== true) throw fail('Dépôt réel refusé : il faut la confirmation explicite de l\'utilisateur dans la conversation (confirmation_utilisateur = true), donnée juste avant ce dépôt.');
     const tests = journal.filter(function (e) { return e.mode === 'test' && e.hash === v.hash && e.idflux && e.http === 200 && (e.sourceFlux === 'accusé' || e.sourceFlux === 'liste des dépôts'); });
     if (!tests.length) throw fail('Dépôt réel refusé : déposez d\'abord la même déclaration en mode test (le fichier de test ne diffère que par S10.G00.00.005), puis attendez son bilan.');
     const dernier = tests[tests.length - 1];
@@ -341,9 +400,19 @@ async function deposer(d, a, mode) {
     if (!b.bilan) throw fail('Le bilan du dépôt test (flux ' + dernier.idflux + ') n\'est pas encore disponible : réessayez dans quelques minutes.');
     if (/KO/i.test(b.bilan.statut)) throw fail('Le dépôt test (flux ' + dernier.idflux + ') a un bilan KO : corrigez la déclaration avant le dépôt réel.');
     if (/COURS/i.test(b.bilan.statut)) throw fail('Le bilan du dépôt test est encore en cours : réessayez dans quelques minutes.');
+    if (v.type !== 'néant' && String(v.mois) > moisEnCours()) throw fail('Dépôt réel refusé : ' + libMois(v.mois) + ' est un mois à venir ; une DSN avec salaire se dépose une fois la paie du mois faite.');
     if (v.type !== 'néant') {
       lic = await licence.autoriser(v.siren, { demo: modeDemo(), version: VERSION });
+      if (lic.statut === 'essai') lic = Object.assign({}, lic, { autorise: false, message: 'Pendant l\'essai, DSNap montre un aperçu de la paie. Le dépôt réel d\'une DSN avec salaire s\'ouvre avec l\'abonnement.' });
       if (!lic.autorise) return { texte: 'Dépôt réel non effectué : ' + texteLicence(lic) + '\nLe fichier « ' + a.fichier + ' » reste utilisable pour un dépôt manuel sur net-entreprises.fr.', donnees: { licence: lic }, erreur: true };
+    }
+    if (eliciter) {
+      const r = await eliciter('DSNap va déposer EN RÉEL sur net-entreprises la DSN ' + (v.type === 'néant' ? 'néant ' : '') + 'de ' + libMois(v.mois) + ' (SIRET ' + v.siret + ', fichier « ' + d.relatif(chemin) + ' », empreinte ' + v.hash.slice(0, 12) + '). Le dépôt test du même contenu a le bilan ' + b.bilan.statut + '. Une DSN réelle est transmise aux organismes sociaux et ne s\'annule pas. Confirmez-vous ce dépôt ?',
+        { type: 'object', properties: { deposer: { type: 'boolean', title: 'Déposer cette DSN en réel', description: 'Cochez pour envoyer la déclaration de ' + libMois(v.mois) + ' aux organismes sociaux.', default: false } }, required: ['deposer'] });
+      if (!(r && r.action === 'accept' && r.content && r.content.deposer === true)) return { texte: 'Dépôt réel non effectué : l\'utilisateur ne l\'a pas confirmé dans la fenêtre de DSNap' + (r && r.action === 'decline' ? ' (refus)' : r && r.action === 'cancel' ? ' (fenêtre fermée)' : '') + '. Rien n\'a été envoyé.' +
+        // une application sans écran (tâche planifiée, Claude Code sans interface) ferme la fenêtre d'elle-même (constaté le 10/11) :
+        // un refus explicite reste un refus, sans autre voie proposée
+        (r && r.action === 'decline' ? '' : ' Si votre application ne peut pas afficher cette fenêtre (tâche planifiée, mode sans interface), faites le dépôt réel dans une conversation, ou activez le dépôt automatique sur votre page de configuration (configurer_dsnap) : DSNap dépose alors le réel après un dépôt test conforme du même fichier.'), donnees: { confirme: false, action: (r && r.action) || null }, erreur: true };
     }
   }
   // l'envoi est noté AVANT de partir : si la réponse se perd, le mois reste bloqué jusqu'à vérification
@@ -428,26 +497,30 @@ async function outilRechercher(a) {
   const re = /^(\d{4})-(\d{2})-(\d{2})$/;
   const x = re.exec(String(a.du || '')), z = re.exec(String(a.au || a.du || ''));
   if (!x || !z) throw fail('Paramètres du et au au format AAAA-MM-JJ.');
-  const debut = new Date(+x[1], +x[2] - 1, +x[3]), fin = new Date(+z[1], +z[2] - 1, +z[3]);
+  // jours civils de Paris (ceux de net-entreprises), quel que soit le fuseau horaire de cet ordinateur
+  const debut = Date.UTC(+x[1], +x[2] - 1, +x[3]), fin = Date.UTC(+z[1], +z[2] - 1, +z[3]);
   const jours = Math.round((fin - debut) / 86400000) + 1;
-  if (jours < 1 || jours > 31) throw fail('Plage de 1 à 31 jours.');
+  if (!(jours >= 1 && jours <= 31)) throw fail('Plage de 1 à 31 jours.');
+  const jourCivil = function (ms) { const j = new Date(ms); return j.getUTCFullYear() + pad2(j.getUTCMonth() + 1) + pad2(j.getUTCDate()); };
+  const jourParis = function (ms) { return NE.dateNE(new Date(ms)).slice(0, 8); };
+  const premier = jourCivil(debut), dernier = jourCivil(fin);
   const c = client();
   let tous = [];
-  for (let i = 0; i < jours; i++) {
-    const j = new Date(debut.getFullYear(), debut.getMonth(), debut.getDate() + i);
-    tous = tous.concat(await c.depotsJour(j.getFullYear() + pad2(j.getMonth() + 1) + pad2(j.getDate())));
-  }
+  for (let i = 0; i < jours; i++) tous = tous.concat(await c.depotsJour(jourCivil(debut + i * 86400000)));
   let journal = [], d = null, rapproches = [];
   try { d = dossier(); journal = d.lireJournal(); } catch (e) { journal = []; }
   // dépôts envoyés sans réponse claire, dans la période cherchée : retrouvés dans la liste, ou constatés non reçus
   if (d) {
-    const finRecherche = new Date(fin.getFullYear(), fin.getMonth(), fin.getDate(), 23, 59, 59).getTime();
     journal.filter(function (e) { return e.etat === 'incertain' || e.etat === 'envoi'; }).forEach(function (e) {
       const t = Date.parse(e.horodatage);
-      if (!(t >= debut.getTime() && t <= finRecherche)) return;
-      const x = fluxUnique(tous, journal, t);
-      if (x) { d.majEntree(e.id, { idflux: x.idflux, sourceFlux: 'liste des dépôts', etat: 'envoye', http: 200, statutListe: x.statut }); rapproches.push('dépôt ' + e.mode + ' ' + dePrepMois(e.mois) + ' du ' + dateFr(e.horodatage) + ' retrouvé : flux ' + x.idflux + ' (lisez son bilan)'); }
-      else if (Date.now() - t > 30 * 60000 && t + 15 * 60000 <= finRecherche) { d.majEntree(e.id, { etat: 'non_recu' }); rapproches.push('dépôt ' + e.mode + ' ' + dePrepMois(e.mois) + ' du ' + dateFr(e.horodatage) + ' absent de net-entreprises : non reçu, il peut être refait'); }
+      if (!(t > 0) || jourParis(t) < premier || jourParis(t) > dernier) return;
+      const quoi = 'dépôt ' + e.mode + ' ' + dePrepMois(e.mois) + ' du ' + dateFr(e.horodatage);
+      // journal relu à chaque entrée : un flux rattaché à l'une n'est plus candidat pour la suivante
+      const k = candidatsFlux(tous, d.lireJournal(), e, t);
+      if (k.flux) { d.majEntree(e.id, { idflux: k.flux.idflux, sourceFlux: 'liste des dépôts', etat: 'envoye', http: 200, statutListe: k.flux.statut }); rapproches.push(quoi + ' retrouvé : flux ' + k.flux.idflux + ' (lisez son bilan)'); }
+      else if (k.proches.length) rapproches.push(quoi + ' : plusieurs dépôts possibles dans la liste (flux ' + k.proches.map(function (y) { return y.idflux; }).join(', ') + '), DSNap ne peut pas savoir lequel est le sien. Il reste « incertain » : ouvrez les retours de ces flux pour voir quel mois ils déclarent, et ne redéposez pas');
+      // « non reçu » seulement sur une absence constatée : aucun candidat, fenêtre de ±15 minutes entièrement cherchée, liste à jour
+      else if (Date.now() - t > 30 * 60000 && jourParis(t - 15 * 60000) >= premier && jourParis(t + 15 * 60000) <= dernier) { d.majEntree(e.id, { etat: 'non_recu' }); rapproches.push(quoi + ' absent de net-entreprises : non reçu, il peut être refait'); }
     });
     if (rapproches.length) journal = d.lireJournal();
   }
@@ -506,7 +579,7 @@ const OUTILS = [
   }, ['mois']), annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }, run: outilPreparer },
   { name: 'simuler_budget', title: 'Brut maximal pour un budget', description: 'Calcule le brut le plus élevé dont le coût total (salaire chargé, frais remboursés, titres-restaurant) tient dans un budget mensuel. Gratuit, n\'écrit rien.', inputSchema: S({ mois: { type: 'string', pattern: '^\\d{4}-(0[1-9]|1[0-2])$', description: 'AAAA-MM' }, budget: { type: 'number', description: 'Budget mensuel total en euros (sinon celui de la configuration).' }, titres_restaurant: { type: 'integer' } }, ['mois']), annotations: { readOnlyHint: true, openWorldHint: false }, run: outilBudget },
   { name: 'verifier_fichier_dsn', title: 'Contrôler un fichier DSN', description: 'Contrôle un fichier DSN du dossier de paie (produit par DSNap ou un autre logiciel) : forme du flux, encodage, cohérences du cahier technique, recalcul des montants, codes face aux tables officielles de net-entreprises. Aucun envoi. Gratuit.', inputSchema: S({ fichier: FICHIER }, ['fichier']), annotations: { readOnlyHint: true, openWorldHint: false }, run: outilVerifier },
-  { name: 'deposer_dsn', title: 'Déposer une DSN sur net-entreprises', description: 'Dépose un fichier DSN sur net-entreprises et renvoie le bilan. mode « test » : fichier de test (S10.G00.00.005 = 01), contrôlé par net-entreprises sans transmission aux organismes. mode « reel » : fichier réel (02) ; exige un dépôt test du même contenu au bilan non KO, et confirmation_utilisateur = true après l\'accord explicite de l\'utilisateur dans la conversation (sauf réglage contraire choisi par l\'utilisateur sur sa page de configuration). Refuse un doublon d\'un mois déjà déclaré et bloque le mois si un envoi précédent est resté sans réponse. Ne relancez jamais un dépôt après une coupure : utilisez rechercher_depots. Dépôt réel d\'une DSN avec salaire : essai ou abonnement ; DSN néant : gratuit.', inputSchema: S({
+  { name: 'deposer_dsn', title: 'Déposer une DSN sur net-entreprises', description: 'Dépose un fichier DSN sur net-entreprises et renvoie le bilan. mode « test » : fichier de test (S10.G00.00.005 = 01), contrôlé par net-entreprises sans transmission aux organismes. mode « reel » : fichier réel (02) ; exige un dépôt test du même contenu au bilan non KO, et confirmation_utilisateur = true après l\'accord explicite de l\'utilisateur dans la conversation (sauf réglage contraire choisi par l\'utilisateur sur sa page de configuration) ; si son application le permet, DSNap lui demande en plus de confirmer lui-même dans une fenêtre, juste avant l\'envoi. Refuse un doublon d\'un mois déjà déclaré et bloque le mois si un envoi précédent est resté sans réponse. Ne relancez jamais un dépôt après une coupure : utilisez rechercher_depots. Dépôt réel d\'une DSN avec salaire : essai ou abonnement ; DSN néant : gratuit.', inputSchema: S({
     fichier: FICHIER, mode: { type: 'string', enum: ['test', 'reel'] },
     confirmation_utilisateur: { type: 'boolean', description: 'true uniquement si l\'utilisateur vient de valider explicitement CE dépôt réel.' },
     attendre_bilan: { type: 'boolean', description: 'Par défaut, attend jusqu\'à 30 secondes le bilan de conformité. false pour rendre la main tout de suite.' }
@@ -527,4 +600,4 @@ const INSTRUCTIONS = 'DSNap fait la paie et la DSN mensuelle d\'un président de
   'Paie d\'un mois : preparer_dsn (brut 0 = DSN néant), présentez le résultat, deposer_dsn en mode test sur le fichier « - TEST.txt », lisez le bilan, puis, après l\'accord explicite de l\'utilisateur, deposer_dsn en mode reel sur le fichier « - REEL.txt » avec confirmation_utilisateur = true. ' +
   'Avant un rattrapage : rechercher_depots sur la période, pour ne rien déposer deux fois. Ne recalculez jamais les montants vous-même, et ne montrez jamais un numéro de sécurité sociale.';
 
-module.exports = { OUTILS, INSTRUCTIONS, reinitialiserClient, masquerSortie, voirNirs, _interne: { identifiants, modeDemo, client, declaresEnReel, fluxUnique } };
+module.exports = { OUTILS, INSTRUCTIONS, reinitialiserClient, masquerSortie, voirNirs, _interne: { identifiants, modeDemo, client, declaresEnReel, fluxUnique, candidatsFlux } };

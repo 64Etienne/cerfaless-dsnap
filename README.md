@@ -5,10 +5,10 @@
 Vous êtes président de SASU (ou de SAS), assimilé salarié, et vous déposez chaque mois une DSN, avec ou sans salaire. Dites à Claude « Prépare ma DSN d'octobre » : DSNap calcule la paie, écrit le bulletin et la note de frais en PDF, fabrique la DSN, la contrôle comme net-entreprises, la dépose en test, puis en réel après votre feu vert, et lit les retours.
 
 - **DSN néant gratuite, sans limite.** Un mois sans salaire se déclare en deux phrases.
-- **Paie avec salaire :** essai de 7 jours, puis 6,90 € par mois ou 70 € par an, sans engagement.
+- **Paie avec salaire :** aperçu gratuit pendant 7 jours, puis 6,90 € par mois ou 70 € par an, sans engagement et sans compte à créer.
 - **Contrôles avant dépôt :** format et encodage, cohérences du cahier technique, recalcul du bordereau Urssaf CTP par CTP, et chaque code (NAF, PCS-ESE, risque AT, Urssaf, barème du prélèvement à la source…) vérifié dans les tables officielles de net-entreprises, mises à jour automatiquement.
 - **Garde-fous :** pas de dépôt réel sans dépôt test conforme du même fichier ni sans votre accord explicite (sauf si vous choisissez vous-même le dépôt automatique) ; DSNap refuse de redéposer un mois qu'il a déjà déposé, et bloque le mois si un envoi est resté sans réponse, jusqu'à vérification sur net-entreprises.
-- **Vos données restent chez vous :** identifiants net-entreprises chiffrés dans le trousseau de votre ordinateur, numéro de sécurité sociale saisi sur une page locale et masqué dans toutes les réponses de DSNap à Claude.
+- **Vos données restent chez vous :** identifiants net-entreprises chiffrés dans le trousseau de votre ordinateur, numéro de sécurité sociale saisi sur une page locale et masqué dans toutes les réponses de DSNap à Claude. Le fichier DSN et le bulletin sont fabriqués sur votre ordinateur. Pour le calcul, le salaire est envoyé à cerfaless.fr, sans votre nom ; il n'est pas conservé.
 
 DSNap fait partie de **Cerfaless**, des outils qui font vos démarches administratives avec Claude et les déposent pour de vrai.
 
@@ -22,7 +22,7 @@ Pas encore couvert : salariés, plusieurs dirigeants rémunérés, rémunératio
 
 ## Installation
 
-DSNap a besoin d'un client Claude qui exécute un serveur MCP sur votre ordinateur : l'app Claude de bureau (Windows, macOS), Claude Code, ou une session Cowork sur votre ordinateur.
+DSNap a besoin d'un client qui exécute un serveur MCP sur votre ordinateur : l'app Claude de bureau (Windows, macOS), Claude Code, ou une session Cowork sur votre ordinateur. Pour les autres clients locaux (ChatGPT de bureau, Codex, Cursor, Antigravity), voir « Autres clients » plus bas. Le navigateur seul ne suffit pas : ChatGPT sur le web, l'application Gemini et les mobiles ne lancent pas de serveur local.
 
 - **Extension de bureau** (aucun prérequis) : téléchargez `dsnap.mcpb` sur https://cerfaless.fr/dsnap/installation et ouvrez-le avec Claude.
 - **Plugin** : installez DSNap depuis le répertoire de plugins de Claude, ou dans Claude Code :
@@ -31,6 +31,15 @@ DSNap a besoin d'un client Claude qui exécute un serveur MCP sur votre ordinate
   /plugin install dsnap@cerfaless
   ```
   Le serveur du plugin se lance avec Node.js 18 ou plus récent.
+
+### Autres clients
+
+DSNap est un serveur MCP local. Avec Node.js 18 ou plus récent sur votre ordinateur, une seule commande suffit : `npx -y @cerfaless/dsnap`.
+
+- **ChatGPT de bureau** : Réglages, MCP servers, Add server, STDIO, commande `npx -y @cerfaless/dsnap`.
+- **Codex** : `codex mcp add dsnap -- npx -y @cerfaless/dsnap`.
+- **Cursor** : bouton sur https://cerfaless.fr/dsnap/installation, ou `~/.cursor/mcp.json` : `{"mcpServers":{"dsnap":{"command":"npx","args":["-y","@cerfaless/dsnap"]}}}`.
+- **Antigravity** : `~/.gemini/config/mcp_config.json`, même format.
 
 Puis demandez à Claude : « Configure DSNap ». Une page s'ouvre dans votre navigateur, servie par DSNap sur votre ordinateur, pour choisir le dossier de paie, enregistrer vos identifiants net-entreprises et renseigner la société (le plus simple : importer votre dernière DSN acceptée).
 
@@ -59,15 +68,16 @@ DSNap est un serveur MCP en JavaScript lisible, sans dépendance (Node.js seul),
 - **ouvre** un serveur web local sur `127.0.0.1` (port aléatoire, adresse à jeton, fermé après 30 minutes d'inactivité) pour la page de configuration ;
 - **envoie à net-entreprises** (`services.net-entreprises.fr`, `depot.dsnrg.net-entreprises.fr`, `consultation.dsnrg.net-entreprises.fr`, `telechargement*.dsnrg.net-entreprises.fr`), sur votre demande : vos identifiants pour l'authentification, vos fichiers DSN pour le dépôt, les demandes de retours ;
 - **télécharge depuis net-entreprises.fr** les tables de référence officielles de la norme DSN et le flux d'actualités du site (au plus toutes les 12 heures) ; en secours, une copie de ces tables publiée sur `cerfaless.fr/dsnap/tables` ou, à défaut, dans les versions publiées du projet sur GitHub (`github.com/64Etienne/cerfaless-dsnap/releases`) ;
-- **envoie au service d'abonnement de DSNap** (`cerfaless.fr/api/dsnap`), seulement lors d'une paie avec salaire ou d'un dépôt réel avec salaire, et quand vous consultez l'état : une empreinte SHA-256 du SIREN (donnée pseudonymisée : le SIREN n'est pas transmis, mais un SIREN connu peut y être rapproché), un identifiant d'installation aléatoire et la version de DSNap. Jamais de NIR, de nom, de montant ni d'identifiant net-entreprises.
+- **envoie au service d'abonnement de DSNap** (`cerfaless.fr/api/dsnap`), seulement lors d'une paie avec salaire ou d'un dépôt réel avec salaire, et quand vous consultez l'état : une empreinte SHA-256 du SIREN (donnée pseudonymisée : le SIREN n'est pas transmis, mais un SIREN connu peut y être rapproché), un identifiant d'installation aléatoire et la version de DSNap. Jamais de NIR, de nom ni d'identifiant net-entreprises.
+- **envoie au service de calcul de DSNap** (`cerfaless.fr/api/dsnap/v1`), pour une paie avec salaire, un aperçu ou une simulation : la même empreinte, le mois, le salaire brut, les options de calcul et le département. Jamais de NIR, de nom, d'adresse ni de banque. Le calcul se fait en mémoire et rien n'est conservé, sauf le nombre de calculs du mois.
 
-En mode démonstration, rien n'est envoyé à net-entreprises ni au service d'abonnement : un simulateur local répond à la place de net-entreprises (seules les tables publiques peuvent être téléchargées).
+En mode démonstration, rien n'est envoyé à net-entreprises ni au service d'abonnement (seul le calcul de la société fictive passe par cerfaless.fr) : un simulateur local répond à la place de net-entreprises (seules les tables publiques peuvent être téléchargées).
 
 ## Politique de confidentialité
 
 Éditeur : SASU EBO, Toulouse (France). Contact : https://cerfaless.fr/contact.
 
-- **Données de paie** (identité du président dont le numéro de sécurité sociale, rémunérations, adresse, coordonnées bancaires de la société) : traitées et stockées uniquement sur votre ordinateur, dans votre dossier de paie. SASU EBO n'y a pas accès. Choisissez un dossier qui n'est pas synchronisé avec un service en ligne si vous ne voulez pas que ces fichiers y soient copiés (par défaut : `DSNap` dans votre dossier personnel). Elles sont transmises à net-entreprises seulement quand vous déposez une DSN, comme le prévoit la déclaration sociale nominative.
+- **Données de paie** (identité du président dont le numéro de sécurité sociale, adresse, coordonnées bancaires de la société) : stockées uniquement sur votre ordinateur, dans votre dossier de paie. Pour le calcul d'une paie avec salaire, le salaire est envoyé à cerfaless.fr, avec les options de calcul, sans nom ni numéro de sécurité sociale ; il n'est pas conservé. Choisissez un dossier qui n'est pas synchronisé avec un service en ligne si vous ne voulez pas que ces fichiers y soient copiés (par défaut : `DSNap` dans votre dossier personnel). Elles sont transmises à net-entreprises seulement quand vous déposez une DSN, comme le prévoit la déclaration sociale nominative.
 - **Identifiants net-entreprises** : chiffrés dans le trousseau de votre système, utilisés seulement pour vous authentifier auprès de net-entreprises. Jamais transmis à SASU EBO ni à Claude.
 - **Ce que voit Claude** : les résultats des outils (montants, statuts, chemins de fichiers, messages de contrôle), numéros de sécurité sociale masqués. Les conversations relèvent de la politique de confidentialité d'Anthropic.
 - **Service d'abonnement** : empreinte du SIREN, identifiant d'installation et version, vérifiés auprès de Stripe, qui conserve l'empreinte et les dates d'essai dès l'essai, puis les informations de facturation à la souscription ; conservés pendant l'essai et l'abonnement, puis 3 ans. Factures conservées 10 ans (obligation comptable). Paiement par Stripe (Stripe Payments Europe).
@@ -78,6 +88,10 @@ Politique complète : https://cerfaless.fr/confidentialite · fichier `PRIVACY.m
 ## Pour les relecteurs (English)
 
 DSNap is a French payroll tool: it prepares, checks and files the monthly DSN (social security declaration) of a French single-shareholder company president through the official net-entreprises API, using the user's own credentials. To evaluate it without a French company or a net-entreprises account, ask Claude « Configure DSNap » and click « Essayer la démonstration » on the local page: a fictitious company is set up and every filing goes to a built-in simulator (no network request to net-entreprises or to the licensing service). Then try « Prépare la DSN de septembre 2026 avec un brut de 1 800 € », « Dépose-la en test », « Dépose-la en réel » (Claude must ask for explicit confirmation), « Prépare une DSN néant pour octobre ». Tests: `node --test tests/*.test.js` (no dependencies).
+
+## Soutenir DSNap
+
+DSNap est développé par une seule personne. Pour soutenir son travail sur DSNap et la suite Cerfaless : [ko-fi.com/64etienne](https://ko-fi.com/64etienne). Le don est facultatif et ne remplace pas l'abonnement : il ne donne aucun droit sur DSNap.
 
 ## Licence
 

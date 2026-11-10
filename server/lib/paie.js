@@ -10,7 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 global.RUB_LABELS = global.RUB_LABELS || require('./rub.json');
-const E = require('./engine.js');
+const E = require('./noyau.js');
 const { masqueur, nirsDuTexte } = require('./confidentialite.js');
 const pdf = require('./pdf.js');
 
@@ -92,7 +92,7 @@ function blocEntete(p, st, recap, inp, nomComplet, y) {
   return y + 100;
 }
 function eurTxt(c) { return c === null || c === undefined ? '' : E.eur(c, true); }
-function bulletinPdf(r, st, recap, inp, nomComplet, libMois) {
+function bulletinPdf(r, st, recap, inp, nomComplet, libMois, lignesBulletin) {
   const doc = pdf.document({ titre: 'Bulletin de paie ' + libMois });
   const p = doc.page();
   p.texte(40, 52, 'Bulletin de paie', { gras: true, taille: 18 });
@@ -105,7 +105,7 @@ function bulletinPdf(r, st, recap, inp, nomComplet, libMois) {
     if (i === 0) p.texte(46, y + 12, t, { gras: true, taille: 8 }); else p.texte(cols[i + 1] - 4, y + 12, t, { gras: true, taille: 8, align: 'right' });
   });
   y += 18;
-  E.bulletin(r).forEach(function (x) {
+  lignesBulletin.forEach(function (x) {
     const h = 15;
     if (x.g === 'brut') {
       p.texte(46, y + 11, x.lab, { gras: true, taille: 8.5 }); p.texte(cols[2] - 4, y + 11, eurTxt(x.brut), { gras: true, taille: 8.5, align: 'right' });
@@ -141,7 +141,7 @@ function bulletinPdf(r, st, recap, inp, nomComplet, libMois) {
   });
   y += 14;
   y = p.paragraphe(40, y, 'Dans votre intérêt et pour vous aider à faire valoir vos droits, conservez ce bulletin de paie sans limitation de durée. Rubrique dédiée au bulletin de paie sur le portail www.service-public.fr.', 515, { taille: 7.5, couleur: GRIS });
-  p.texte(40, 815, 'Établi avec DSNap — calcul conforme aux règles ' + E.P.annee + ' pour un président de SASU assimilé salarié.', { taille: 7, couleur: GRIS });
+  p.texte(40, 815, 'Établi avec DSNap — calcul conforme aux règles ' + r.y + ' pour un président de SASU assimilé salarié.', { taille: 7, couleur: GRIS });
   return doc.fin();
 }
 function noteFraisPdf(r, st, recap, inp, nomComplet, libMois) {
@@ -175,9 +175,9 @@ function noteFraisPdf(r, st, recap, inp, nomComplet, libMois) {
 /**
  * o : { dossier (objet de dossier.js), cfg, mois 'AAAA-MM', brut (euros, 0 = néant), dateVersement, dateConstitution,
  *       numero, tr, loyer, elec, box, mobile, assurance, pasTaux, pasId, acre, simuler, budgetMax,
- *       controleurTables (nomenclatures.controleur), version, maintenant }
+ *       controleurTables (nomenclatures.controleur), version, maintenant, sansReel (démonstration : pas de fichier réel) }
  */
-function preparer(o) {
+async function preparer(o) {
   const cfg = o.cfg || {};
   const ch = cfg.choix || {}, fdef = cfg.facturesParDefaut || {}, auto = cfg.automatisation || {};
   const m = /^(\d{4})-(\d{2})$/.exec(String(o.mois || ''));
@@ -221,13 +221,7 @@ function preparer(o) {
     const s = E.clone(st);
     if (o.tr === undefined || o.tr === null || o.tr === '') s.inp.trNb = ch.trJoursOuvres !== false && ch.trFaciale ? jo : 0;
     ['loyer', 'elec', 'box', 'mobile', 'assurance'].forEach(function (k) { if (o[k] === undefined || o[k] === null) s.inp[k] = euros(fdef[k], 0); });
-    const cout = function (b) { s.inp.brut = b; return E.compute(s).budget; };
-    let lo = 0, hi = E.P.pmss;
-    if (cout(0) > cible) return { mois: o.mois, budget: cible / 100, brutMax: null, message: 'Les frais et les titres-restaurant dépassent déjà le budget.' };
-    if (cout(hi) <= cible) lo = hi; else while (hi - lo > 1) { const mid = Math.floor((lo + hi) / 2); if (cout(mid) <= cible) lo = mid; else hi = mid; }
-    const best = Math.floor(lo / 100) * 100;
-    s.inp.brut = best; const rb = E.compute(s);
-    return { mois: o.mois, budget: cible / 100, brutMax: best / 100, coutTotal: rb.budget / 100, salaireVire: rb.netPaye / 100, fraisRembourses: rb.frais.total / 100, acre: rb.acre.mode, plafond: best >= E.P.pmss ? 'brut limité au plafond mensuel de la Sécurité sociale (' + E.eur(E.P.pmss) + '), maximum géré par DSNap' : null };
+    return Object.assign({ mois: o.mois, budget: cible / 100 }, await o.simulation(E.entreesCalcul(s), cible));
   }
 
   /* numéro d'ordre : rang parmi les DSN fabriquées ce mois civil */
@@ -237,12 +231,20 @@ function preparer(o) {
   if (!(numero >= 1)) throw fail('Numéro d\'ordre invalide : ' + o.numero);
   inp.numeroOrdre = String(numero);
 
-  const r = E.compute(st);
+  // paie avec salaire : le calcul se fait sur le serveur (o.calculer, o.simulation), le fichier sur l'ordinateur. Seuls le mois, le
+  // brut et les options de calcul partent (E.entreesCalcul) ; l'identité reste ici. DSN néant : aucun calcul, aucun réseau.
+  let rep = null;
+  if (inp.brut > 0) {
+    const entrees = E.entreesCalcul(st);
+    rep = o.simuler ? await o.simulation(entrees) : await o.calculer(entrees);
+    if (rep.apercu) return Object.assign({ pret: false, apercu: true, simulation: !!o.simuler, mois: o.mois, libelle: MOIS_FR[M - 1] + ' ' + Y, type: 'aperçu' }, rep.apercu);
+  }
+  const r = rep ? rep.r : E.resultatNeant(st);
   const dsnTest = E.buildDSN(st, r);
   st.inp.typeEnvoi = '02';
   const dsnReel = E.buildDSN(st, r);
   st.inp.typeEnvoi = '01';
-  const ctl = E.controls(dsnTest, { r: r, inp: st.inp, nomenclatures: o.controleurTables || null });
+  const ctl = E.controls(dsnTest, { r: r, inp: st.inp, nomenclatures: o.controleurTables || null }).concat(rep ? rep.controles : []);
   const masquerNir = masqueur(nirsDuTexte(E.toText(dsnTest)).concat([st.indiv['S21.G00.30.001'] || '']).concat(base.texteRef ? nirsDuTexte(base.texteRef) : []));
   const normeDsn = String((dsnTest.find(function (l) { return l.c === 'S10.G00.00.006'; }) || {}).v || '');
   const jeuNm = normeDsn && o.controleurTables ? o.controleurTables.jeu(normeDsn) : null;
@@ -258,7 +260,7 @@ function preparer(o) {
     noteFrais: r.frais.total > 0 ? 'Note de frais ' + MOIS[M - 1] + ' ' + Y + '.pdf' : null
   };
   const rel = function (n) { return n ? o.dossier.relatif(path.join(dirMois, n)) : null; };
-  const fichiers = { dsnTest: rel(noms.dsnTest), dsnReel: rel(noms.dsnReel), recap: rel(noms.recap), bulletin: rel(noms.bulletin), noteFrais: rel(noms.noteFrais) };
+  const fichiers = { dsnTest: rel(noms.dsnTest), dsnReel: o.sansReel ? null : rel(noms.dsnReel), recap: rel(noms.recap), bulletin: rel(noms.bulletin), noteFrais: rel(noms.noteFrais) };
   const c = r.c;
   const nomComplet = ((st.indiv['S21.G00.30.004'] || '') + ' ' + (st.indiv['S21.G00.30.002'] || '')).trim();
   const nir = String(st.indiv['S21.G00.30.001'] || '');
@@ -284,9 +286,9 @@ function preparer(o) {
   if (!o.simuler) {
     fs.mkdirSync(dirMois, { recursive: true });
     fs.writeFileSync(path.join(dirMois, noms.dsnTest), Buffer.from(E.toLatin1(E.toText(dsnTest))));
-    fs.writeFileSync(path.join(dirMois, noms.dsnReel), Buffer.from(E.toLatin1(E.toText(dsnReel))));
+    if (!o.sansReel) fs.writeFileSync(path.join(dirMois, noms.dsnReel), Buffer.from(E.toLatin1(E.toText(dsnReel))));
     fs.writeFileSync(path.join(dirMois, noms.recap), JSON.stringify(recap, null, 2));
-    if (noms.bulletin) fs.writeFileSync(path.join(dirMois, noms.bulletin), bulletinPdf(r, st, recap, inp, nomComplet, libMois));
+    if (noms.bulletin) fs.writeFileSync(path.join(dirMois, noms.bulletin), bulletinPdf(r, st, recap, inp, nomComplet, libMois, rep ? rep.bulletin : []));
     if (noms.noteFrais) fs.writeFileSync(path.join(dirMois, noms.noteFrais), noteFraisPdf(r, st, recap, inp, nomComplet, libMois));
     etat.ordre[cleMois] = Math.max(etat.ordre[cleMois] || 0, numero);
     o.dossier.ecrireEtat(etat);

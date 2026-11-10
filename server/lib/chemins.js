@@ -23,7 +23,8 @@ function dossierDonnees() {
   if (process.platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'DSNap');
   return path.join(ENV.XDG_CONFIG_HOME || path.join(home, '.config'), 'dsnap');
 }
-function assurer(d) { fs.mkdirSync(d, { recursive: true }); return d; }
+// dossier de données privé (réglages, cache de licence, trousseau de repli) : 0700, fichiers en 0600
+function assurer(d) { fs.mkdirSync(d, { recursive: true, mode: 0o700 }); return d; }
 function donnees() { return assurer(dossierDonnees()); }
 
 // dans le dossier personnel plutôt que dans Documents, souvent synchronisé (iCloud, OneDrive) : les fichiers de paie
@@ -44,7 +45,7 @@ function lireReglages() {
 function ecrireReglages(r) {
   donnees();
   const f = cheminReglages(), tmp = f + '.' + process.pid + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(r, null, 2));
+  fs.writeFileSync(tmp, JSON.stringify(r, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, f);
   return r;
 }
@@ -61,4 +62,15 @@ function dossierPaie() {
   return r.dossier ? path.resolve(r.dossier) : null;
 }
 
-module.exports = { dossierDonnees, donnees, assurer, dossierPaieParDefaut, lireReglages, ecrireReglages, modifierReglages, dossierPaie };
+/** PATH réduit aux dossiers absolus, sans ceux que npx ajoute (node_modules/.bin) : un projet ouvert dans le client ne doit pas pouvoir
+ *  remplacer secret-tool, security ou xdg-open, qui reçoivent le mot de passe ou une adresse (revue de sécurité du 06/11/2026). */
+function binairesSurs(p) {
+  const garde = String(p || '').split(path.delimiter).filter(function (d) {
+    return path.isAbsolute(d) && !/[\\/]node_modules[\\/]\.bin[\\/]?$/.test(path.normalize(d));
+  });
+  if (garde.length) return garde.join(path.delimiter);
+  // jamais de PATH vide : il reviendrait au dossier courant
+  const systeme = process.env.SystemRoot || 'C:\\Windows';
+  return (process.platform === 'win32' ? [path.join(systeme, 'System32')] : ['/usr/local/bin', '/usr/bin', '/bin']).join(path.delimiter);
+}
+module.exports = { binairesSurs, dossierDonnees, donnees, assurer, dossierPaieParDefaut, lireReglages, ecrireReglages, modifierReglages, dossierPaie };
