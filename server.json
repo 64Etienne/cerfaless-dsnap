@@ -1,0 +1,19 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.64Etienne/cerfaless-dsnap",
+  "title": "DSNap",
+  "description": "Paie et DSN (déclaration sociale nominative) du président de SASU, déposées sur net-entreprises.",
+  "version": "1.2.0",
+  "websiteUrl": "https://cerfaless.fr/dsnap",
+  "repository": { "url": "https://github.com/64Etienne/cerfaless-dsnap", "source": "github" },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "cerfaless-dsnap",
+      "version": "1.2.0",
+      "runtimeHint": "npx",
+      "transport": { "type": "stdio" }
+    }
+  ]
+}
