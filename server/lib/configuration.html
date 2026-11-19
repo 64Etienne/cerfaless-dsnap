@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configurer DSNap</title>
+<style>
+:root {
+  --papier: #F3F5F7; --feuille: #FFFFFF; --encre: #14213D; --encre-2: #4A5670; --cerfa: #1F6F8B; --cerfa-pale: #E3F0F4;
+  --filet: #C9D3DC; --tampon: #5B3FA8; --tampon-pale: #EFEAFB; --ok: #2E7D4F; --ok-pale: #E5F3EA; --erreur: #B3261E; --erreur-pale: #FBE9E7;
+  --rayon: 6px;
+}
+* { box-sizing: border-box; }
+html { background: var(--papier); }
+body { margin: 0; font: 16px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: var(--encre); background: var(--papier); }
+a { color: var(--cerfa); }
+header.bandeau { background: var(--encre); color: #fff; }
+header.bandeau .dans { max-width: 860px; margin: 0 auto; padding: 18px 20px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.marque { font-weight: 800; font-size: 22px; letter-spacing: -0.02em; }
+.marque b { color: #9CD3E3; font-weight: 800; }
+.bandeau p { margin: 0; color: #C9D3E6; font-size: 14px; flex: 1 1 260px; }
+main { max-width: 860px; margin: 0 auto; padding: 24px 20px 80px; }
+.intro { margin: 0 0 20px; color: var(--encre-2); max-width: 68ch; }
+.demo-zone { border: 2px dashed var(--tampon); background: var(--tampon-pale); border-radius: var(--rayon); padding: 14px 16px; margin: 0 0 24px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.demo-zone p { margin: 0; flex: 1 1 280px; font-size: 15px; }
+section.etape { background: var(--feuille); border: 1px solid var(--filet); border-radius: var(--rayon); margin: 0 0 18px; }
+section.etape > h2 { margin: 0; padding: 14px 18px; font-size: 18px; border-bottom: 1px solid var(--filet); display: flex; align-items: center; gap: 12px; }
+.num { display: inline-grid; place-items: center; width: 28px; height: 28px; border: 2px solid var(--cerfa); color: var(--cerfa); font-weight: 800; border-radius: 4px; font-size: 15px; flex: none; }
+.etape.faite .num { background: var(--cerfa); color: #fff; }
+.statut { margin-left: auto; font-size: 13px; font-weight: 600; color: var(--encre-2); }
+.etape.faite .statut { color: var(--ok); }
+.corps { padding: 16px 18px 18px; }
+.corps > p.aide { margin: 0 0 14px; color: var(--encre-2); font-size: 15px; max-width: 70ch; }
+.grille { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px 16px; }
+.plein { grid-column: 1 / -1; }
+label { display: block; font-size: 14px; font-weight: 600; margin: 0 0 4px; }
+label small { font-weight: 400; color: var(--encre-2); }
+input, select { width: 100%; font: inherit; font-size: 15px; padding: 9px 10px; border: 1px solid #9AA9B8; border-radius: 4px; background: #fff; color: var(--encre); }
+input:focus, select:focus, button:focus-visible { outline: 3px solid #9CD3E3; outline-offset: 1px; border-color: var(--cerfa); }
+input.cases { font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace; letter-spacing: 0.18em; }
+.indice { font-size: 13px; color: var(--encre-2); margin-top: 3px; }
+.choix { display: flex; gap: 18px; flex-wrap: wrap; font-size: 15px; }
+.choix label { font-weight: 400; display: flex; gap: 6px; align-items: center; margin: 0; }
+.choix input { width: auto; }
+.actions { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 16px; align-items: center; }
+button { font: inherit; font-weight: 700; font-size: 15px; padding: 10px 16px; border-radius: 4px; border: 2px solid var(--cerfa); background: var(--cerfa); color: #fff; cursor: pointer; }
+button.second { background: #fff; color: var(--cerfa); }
+button.tampon { border-color: var(--tampon); background: var(--tampon); }
+button.discret { border-color: transparent; background: transparent; color: var(--encre-2); text-decoration: underline; padding: 10px 4px; font-weight: 600; }
+button:disabled { opacity: .55; cursor: progress; }
+.message { font-size: 15px; border-radius: 4px; padding: 10px 12px; margin-top: 12px; display: none; white-space: pre-line; }
+.message.ok { display: block; background: var(--ok-pale); color: #1B5634; border-left: 4px solid var(--ok); }
+.message.erreur { display: block; background: var(--erreur-pale); color: #7D1A14; border-left: 4px solid var(--erreur); }
+.message.info { display: block; background: var(--cerfa-pale); color: #134A5D; border-left: 4px solid var(--cerfa); }
+fieldset { border: 1px solid var(--filet); border-radius: 4px; padding: 12px 14px 14px; margin: 14px 0 0; }
+legend { font-weight: 700; font-size: 15px; padding: 0 6px; }
+.import { border: 1px dashed #9AA9B8; border-radius: 4px; padding: 12px 14px; background: #FAFBFC; margin-bottom: 14px; }
+.import input[type=file] { border: none; padding: 6px 0; }
+.fin { background: var(--encre); color: #fff; border-radius: var(--rayon); padding: 20px; display: none; }
+.fin h2 { margin: 0 0 8px; font-size: 20px; }
+.fin p { margin: 0 0 8px; color: #DCE3F0; }
+.fin code { background: rgba(255,255,255,.12); padding: 2px 6px; border-radius: 3px; color: #fff; }
+.secret { font-size: 13px; color: var(--encre-2); margin-top: 10px; }
+@media (max-width: 560px) { section.etape > h2 { font-size: 16px; } .statut { width: 100%; margin-left: 40px; } section.etape > h2 { flex-wrap: wrap; } }
+@media (prefers-reduced-motion: no-preference) { .message { animation: apparait .18s ease-out; } @keyframes apparait { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } } }
+</style>
+</head>
+<body>
+<header class="bandeau"><div class="dans"><span class="marque">DSN<b>ap</b></span><p>Configuration sur votre ordinateur. Rien de ce que vous saisissez ici n'est envoyé à Claude.</p></div></header>
+<main>
+<p class="intro">Remplissez les étapes dans l'ordre. Le mot de passe net-entreprises est chiffré dans le trousseau de votre système ; les informations de la société et du président sont écrites dans votre dossier de paie, sur cet ordinateur.</p>
+
+<div class="demo-zone" id="demo-zone">
+  <p id="demo-texte">Pas encore prêt ? Essayez DSNap avec une société fictive : les dépôts vont à un simulateur, rien n'est envoyé à net-entreprises.</p>
+  <button type="button" class="tampon" id="demo-bouton">Essayer la démonstration</button>
+</div>
+
+<section class="etape" id="e1">
+  <h2><span class="num">1</span>Dossier de paie<span class="statut" id="s1"></span></h2>
+  <div class="corps">
+    <p class="aide">Le dossier où DSNap range la configuration, les DSN, les bulletins et les retours de net-entreprises. DSNap ne lit et n'écrit aucun autre fichier.</p>
+    <label for="dossier">Chemin complet du dossier</label>
+    <input id="dossier" autocomplete="off" spellcheck="false">
+    <div class="indice" id="dossier-indice"></div>
+    <div class="actions"><button type="button" id="b-dossier">Utiliser ce dossier</button></div>
+    <div class="message" id="m1"></div>
+  </div>
+</section>
+
+<section class="etape" id="e2">
+  <h2><span class="num">2</span>Compte net-entreprises<span class="statut" id="s2"></span></h2>
+  <div class="corps">
+    <p class="aide">Les identifiants avec lesquels vous vous connectez à net-entreprises.fr, pour un compte inscrit au service « DSN ». DSNap s'en sert pour déposer vos déclarations et lire les retours, rien d'autre.</p>
+    <div class="grille">
+      <div><label for="ne-siret">SIRET du compte</label><input id="ne-siret" class="cases" inputmode="numeric" maxlength="14" autocomplete="off"></div>
+      <div><label for="ne-nom">Nom</label><input id="ne-nom" autocomplete="family-name"></div>
+      <div><label for="ne-prenom">Prénom</label><input id="ne-prenom" autocomplete="given-name"></div>
+      <div><label for="ne-mdp">Mot de passe</label><input id="ne-mdp" type="password" autocomplete="current-password"><div class="indice" id="mdp-indice"></div></div>
+    </div>
+    <div class="actions">
+      <button type="button" id="b-ident">Enregistrer</button>
+      <button type="button" class="second" id="b-tester">Tester la connexion</button>
+      <button type="button" class="discret" id="b-oublier">Effacer les identifiants</button>
+    </div>
+    <div class="message" id="m2"></div>
+    <p class="secret" id="stockage"></p>
+  </div>
+</section>
+
+<form id="formulaire" autocomplete="off">
+<section class="etape" id="e3">
+  <h2><span class="num">3</span>La société<span class="statut" id="s3"></span></h2>
+  <div class="corps">
+    <div class="import">
+      <label for="import">Le plus simple : importez votre dernière DSN acceptée <small>(fichier .txt fourni par votre logiciel ou votre comptable)</small></label>
+      <input type="file" id="import" accept=".txt,.dsn,.edi,text/plain">
+      <div class="message" id="m-import"></div>
+    </div>
+    <div class="grille">
+      <div class="plein"><label for="raisonSociale">Raison sociale</label><input id="raisonSociale" name="raisonSociale" required></div>
+      <div><label for="siret">SIRET de l'établissement</label><input id="siret" name="siret" class="cases" inputmode="numeric" maxlength="14" required></div>
+      <div><label for="ape">Code APE <small>(ex. 6201Z)</small></label><input id="ape" name="ape" list="l-naf" maxlength="6" required></div>
+      <div class="plein"><label for="adresse">Adresse du siège</label><input id="adresse" name="adresse" required></div>
+      <div><label for="codePostal">Code postal</label><input id="codePostal" name="codePostal" inputmode="numeric" maxlength="5" required></div>
+      <div><label for="ville">Ville</label><input id="ville" name="ville" required></div>
+      <div><label for="urssafSiret">Votre Urssaf</label><select id="urssafSiret" name="urssafSiret" required><option value="">Choisir…</option></select><div class="indice">Celle de la région du siège.</div></div>
+      <div><label for="idcc">Convention collective <small>(9999 = aucune)</small></label><input id="idcc" name="idcc" list="l-idcc" maxlength="4"></div>
+    </div>
+    <fieldset><legend>Contact pour les organismes</legend>
+      <div class="grille">
+        <div><label for="civiliteContact">Civilité</label><select id="civiliteContact" name="civiliteContact"><option value="01">Monsieur</option><option value="02">Madame</option></select></div>
+        <div><label for="contactNom">Nom et prénom</label><input id="contactNom" name="contactNom" required></div>
+        <div><label for="contactMel">Courriel</label><input id="contactMel" name="contactMel" type="email" required></div>
+        <div><label for="contactTel">Téléphone</label><input id="contactTel" name="contactTel" inputmode="tel" required></div>
+      </div>
+    </fieldset>
+    <fieldset><legend>Compte bancaire de la société <small>(prélèvement de l'impôt à la source, s'il y en a)</small></legend>
+      <div class="grille">
+        <div class="plein"><label for="iban">IBAN</label><input id="iban" name="iban" spellcheck="false"></div>
+        <div><label for="bic">BIC</label><input id="bic" name="bic" maxlength="11" spellcheck="false"></div>
+      </div>
+    </fieldset>
+    <fieldset><legend>Accident du travail</legend>
+      <div class="grille">
+        <div><label for="codeRisque">Code risque <small>(999ZZ s'il n'a pas été notifié)</small></label><input id="codeRisque" name="codeRisque" list="l-rat" maxlength="6"></div>
+        <div><label for="tauxAT">Taux AT notifié <small>(en %)</small></label><input id="tauxAT" name="tauxAT" inputmode="decimal"></div>
+      </div>
+      <div class="indice">Le code et le taux figurent sur votre compte AT/MP, sur net-entreprises.</div>
+    </fieldset>
+  </div>
+</section>
+
+<section class="etape" id="e4">
+  <h2><span class="num">4</span>Le président<span class="statut" id="s4"></span></h2>
+  <div class="corps">
+    <p class="aide">Ces informations identifient le président dans la DSN. Elles restent dans votre dossier de paie ; le numéro de sécurité sociale n'apparaît jamais dans les réponses de DSNap.</p>
+    <div class="grille">
+      <div class="plein"><label for="nir">Numéro de sécurité sociale <small>(15 caractères, clé comprise)</small></label><input id="nir" name="nir" class="cases" maxlength="15" autocomplete="off" spellcheck="false"><div class="indice" id="nir-indice"></div></div>
+      <div><label for="nomNaissance">Nom de naissance</label><input id="nomNaissance" name="nomNaissance" required></div>
+      <div><label for="nomUsage">Nom d'usage <small>(facultatif)</small></label><input id="nomUsage" name="nomUsage"></div>
+      <div><label for="prenoms">Prénoms</label><input id="prenoms" name="prenoms" required></div>
+      <div><label for="dateNaissance">Date de naissance</label><input id="dateNaissance" name="dateNaissance" type="date" required></div>
+      <div><label for="lieuNaissance">Commune de naissance</label><input id="lieuNaissance" name="lieuNaissance" required></div>
+      <div><label for="paysNaissance">Pays de naissance</label><input id="paysNaissance" name="paysNaissance" list="l-pays" maxlength="2" required></div>
+      <div class="plein"><label for="adresseIndividu">Adresse personnelle</label><input id="adresseIndividu" name="adresseIndividu" required></div>
+      <div><label for="cpIndividu">Code postal</label><input id="cpIndividu" name="cpIndividu" inputmode="numeric" maxlength="5" required></div>
+      <div><label for="villeIndividu">Ville</label><input id="villeIndividu" name="villeIndividu" required></div>
+      <div><label for="codificationUE">Nationalité</label><select id="codificationUE" name="codificationUE"><option value="01">Française</option><option value="02">Union européenne</option><option value="03">Espace économique européen ou Suisse</option><option value="04">Autre</option></select></div>
+    </div>
+    <fieldset><legend>Le mandat</legend>
+      <div class="grille">
+        <div><label for="debutMandat">Début du mandat</label><input id="debutMandat" name="debutMandat" type="date" required></div>
+        <div><label for="libelleEmploi">Intitulé</label><input id="libelleEmploi" name="libelleEmploi" placeholder="President"></div>
+        <div class="plein"><label for="pcs">Profession <small>(code PCS-ESE : tapez un mot, par exemple « informatique »)</small></label><input id="pcs" name="pcs" list="l-pcs" maxlength="4" required><div class="indice" id="pcs-indice"></div></div>
+        <div><label for="numeroContrat">Numéro de contrat <small>(gardez celui de vos DSN précédentes)</small></label><input id="numeroContrat" name="numeroContrat" maxlength="20" spellcheck="false"></div>
+        <div><label for="statutCategoriel">Retraite complémentaire</label><select id="statutCategoriel" name="statutCategoriel"><option value="01">Cadre (cas habituel du président)</option><option value="04">Non cadre</option></select></div>
+      </div>
+    </fieldset>
+  </div>
+</section>
+
+<section class="etape" id="e5">
+  <h2><span class="num">5</span>Vos choix de paie<span class="statut" id="s5">facultatif</span></h2>
+  <div class="corps">
+    <p class="aide">Ces réglages servent au calcul de chaque mois. Vous pourrez toujours les changer pour un mois donné en le demandant à Claude.</p>
+    <fieldset><legend>Salaire</legend>
+      <div class="choix" role="radiogroup">
+        <label><input type="radio" name="brutMode" value="demande" checked> Claude me demande le brut chaque mois</label>
+        <label><input type="radio" name="brutMode" value="fixe"> Brut fixe</label>
+        <label><input type="radio" name="brutMode" value="budget"> Le plus haut brut qui tient dans mon budget</label>
+      </div>
+      <div class="grille" style="margin-top:10px">
+        <div><label for="brutFixe">Brut fixe mensuel <small>(€)</small></label><input id="brutFixe" name="brutFixe" inputmode="decimal"></div>
+        <div><label for="budgetMensuel">Budget mensuel total <small>(€, salaire chargé + frais)</small></label><input id="budgetMensuel" name="budgetMensuel" inputmode="decimal"></div>
+      </div>
+    </fieldset>
+    <fieldset><legend>ACRE et impôt à la source</legend>
+      <div class="grille">
+        <div><label for="acre">Exonération ACRE</label><select id="acre" name="acre"><option value="non">Non</option><option value="oui">Oui</option></select></div>
+        <div><label for="acreFin">Fin de l'ACRE <small>(12 mois après le début d'activité)</small></label><input id="acreFin" name="acreFin" type="date"></div>
+        <div><label for="acreRegime">Régime de l'ACRE</label><select id="acreRegime" name="acreRegime"><option value="">Selon la date (recommandé)</option><option value="ancien">Société créée avant 2026 : exonération totale</option><option value="2026">Société créée depuis 2026 : exonération de 25 %</option></select><div class="indice">Depuis 2026, l'ACRE se demande à l'Urssaf dans les 60 jours suivant la création.</div></div>
+        <div><label for="pasMode">Taux d'impôt</label><select id="pasMode" name="pasMode"><option value="bareme">Taux neutre (aucun taux transmis)</option><option value="dgfip">Taux transmis par la DGFiP</option></select></div>
+        <div><label for="pasTaux">Taux DGFiP <small>(%)</small></label><input id="pasTaux" name="pasTaux" inputmode="decimal"></div>
+        <div><label for="pasId">Identifiant du taux <small>(compte rendu DGFiP)</small></label><input id="pasId" name="pasId" inputmode="numeric"></div>
+      </div>
+    </fieldset>
+    <fieldset><legend>Frais remboursés au réel <small>(laissez 0 si rien)</small></legend>
+      <div class="grille">
+        <div><label for="surfTotale">Surface du logement <small>(m²)</small></label><input id="surfTotale" name="surfTotale" inputmode="decimal"></div>
+        <div><label for="surfBureau">Surface du bureau <small>(m²)</small></label><input id="surfBureau" name="surfBureau" inputmode="decimal"></div>
+        <div><label for="usagePro">Temps d'usage professionnel du bureau <small>(%)</small></label><input id="usagePro" name="usagePro" inputmode="decimal"></div>
+        <div><label for="loyer">Loyer mensuel <small>(€)</small></label><input id="loyer" name="loyer" inputmode="decimal"></div>
+        <div><label for="elec">Électricité <small>(€/mois)</small></label><input id="elec" name="elec" inputmode="decimal"></div>
+        <div><label for="assurance">Assurance habitation <small>(€/mois)</small></label><input id="assurance" name="assurance" inputmode="decimal"></div>
+        <div><label for="box">Box internet <small>(€/mois)</small></label><input id="box" name="box" inputmode="decimal"></div>
+        <div><label for="usageBox">Part professionnelle de la box <small>(%)</small></label><input id="usageBox" name="usageBox" inputmode="decimal"></div>
+        <div><label for="mobile">Forfait mobile <small>(€/mois)</small></label><input id="mobile" name="mobile" inputmode="decimal"></div>
+        <div><label for="usageMobile">Part professionnelle du mobile <small>(%)</small></label><input id="usageMobile" name="usageMobile" inputmode="decimal"></div>
+      </div>
+    </fieldset>
+    <fieldset><legend>Titres-restaurant</legend>
+      <p class="indice" style="margin:0 0 10px">Pour un président sans contrat de travail et sans salarié, l'exonération de la part payée par la société est contestée : demandez l'avis de votre expert-comptable avant d'en attribuer.</p>
+      <div class="grille">
+        <div><label for="trFaciale">Valeur d'un titre <small>(€, 0 si aucun)</small></label><input id="trFaciale" name="trFaciale" inputmode="decimal"></div>
+        <div><label for="trPartPat">Part payée par la société <small>(50 à 60 %)</small></label><input id="trPartPat" name="trPartPat" inputmode="decimal"></div>
+      </div>
+    </fieldset>
+    <fieldset><legend>Dépôt réel</legend>
+      <div class="choix" role="radiogroup">
+        <label><input type="radio" name="depotReel" value="feu_vert" checked> Claude me demande mon feu vert avant chaque dépôt réel</label>
+        <label><input type="radio" name="depotReel" value="automatique_si_bilan_ok"> Dépôt réel dès que le test est conforme</label>
+      </div>
+    </fieldset>
+    <div class="actions"><button type="submit" id="b-config">Enregistrer la configuration</button></div>
+    <div class="message" id="m5"></div>
+  </div>
+</section>
+</form>
+
+<section class="fin" id="fin">
+  <h2>DSNap est prêt.</h2>
+  <p>Retournez dans Claude et demandez par exemple <code>Prépare ma DSN d'octobre</code> ou <code>Dépose une DSN néant pour octobre</code>.</p>
+  <p>Vous pouvez fermer cette page.</p>
+  <div class="actions"><button type="button" class="second" id="b-terminer">Fermer la configuration</button></div>
+</section>
+
+<datalist id="l-naf"></datalist><datalist id="l-pcs"></datalist><datalist id="l-rat"></datalist><datalist id="l-pays"></datalist><datalist id="l-idcc"></datalist>
+</main>
+<script>
+(function () {
+  'use strict';
+  var base = '/app/';
+  var etat = null, tablesChargees = {};
+  function $(id) { return document.getElementById(id); }
+  function api(route, corps) {
+    var o = corps === undefined ? { headers: {} } : { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-DSNap': '1' }, body: JSON.stringify(corps) };
+    return fetch(base + route, o).then(function (r) { return r.json().then(function (j) { if (!r.ok && j && j.erreur) throw new Error(j.erreur); return j; }); });
+  }
+  function msg(id, type, texte) { var m = $(id); m.className = 'message ' + type; m.textContent = texte; }
+  function effacer(id) { var m = $(id); m.className = 'message'; m.textContent = ''; }
+  function occupe(b, oui) { b.disabled = oui; }
+  function luhn(s) { var t = 0; for (var i = 0; i < s.length; i++) { var d = +s[s.length - 1 - i]; if (i % 2) { d *= 2; if (d > 9) d -= 9; } t += d; } return t % 10 === 0; }
+  function cleNir(n) { var s = n.toUpperCase().replace('2A', '19').replace('2B', '18'); if (!/^\d{13}$/.test(s)) return null; var r = 0; for (var i = 0; i < 13; i++) r = (r * 10 + +s[i]) % 97; var k = 97 - r; return (k < 10 ? '0' : '') + k; }
+  function marquer(n, fait, texte) { $('e' + n).classList.toggle('faite', !!fait); $('s' + n).textContent = texte || (fait ? 'fait' : ''); }
+
+  function chargerTable(abr, cible, rendu) {
+    if (tablesChargees[abr]) return Promise.resolve();
+    return api('api/table/' + abr).then(function (j) {
+      tablesChargees[abr] = j.codes;
+      var el = $(cible), frag = document.createDocumentFragment();
+      j.codes.forEach(function (c) { frag.appendChild(rendu(c)); });
+      el.appendChild(frag);
+    }).catch(function () { /* tables absentes : saisie libre */ });
+  }
+  function option(c) { var o = document.createElement('option'); o.value = c.code; o.textContent = c.libelle; return o; }
+  function chargerListes() {
+    chargerTable('IBC', 'urssafSiret', function (c) { var o = option(c); o.textContent = c.libelle + ' (' + c.code + ')'; return o; }).then(function () { if (etat && etat.formulaire) $('urssafSiret').value = etat.formulaire.urssafSiret || ''; });
+    chargerTable('NAF', 'l-naf', option); chargerTable('PCSESE', 'l-pcs', option); chargerTable('RAT', 'l-rat', option); chargerTable('PAYS', 'l-pays', option); chargerTable('IDCC', 'l-idcc', option);
+  }
+
+  function remplir(f, garderSaisie) {
+    if (!f) return;
+    var form = $('formulaire');
+    Object.keys(f).forEach(function (k) {
+      var el = form.elements[k];
+      if (!el || k === 'nir') return;
+      var v = f[k];
+      if (garderSaisie && (v === '' || v === null || v === undefined)) return;
+      if (el instanceof RadioNodeList) { Array.prototype.forEach.call(el, function (r) { r.checked = r.value === String(v); }); return; }
+      if (el.type === 'checkbox') { el.checked = !!v; return; }
+      el.value = v === null || v === undefined ? '' : v;
+    });
+    if (f.dsnReference) form.dataset.reference = f.dsnReference;
+    $('nir-indice').textContent = f.nirEnregistre ? 'Un numéro est déjà enregistré : laissez vide pour le garder.' : '';
+    verifierPcs();
+  }
+
+  function rendre() {
+    var e = etat;
+    $('dossier').value = e.dossier || e.dossierParDefaut || '';
+    $('dossier').readOnly = !!e.dossierImpose;
+    $('dossier-indice').textContent = e.dossierImpose ? 'Dossier choisi dans les réglages de l\'extension DSNap.' : (e.dossier ? '' : 'Suggestion : ' + e.dossierParDefaut);
+    marquer(1, e.dossierExiste, e.dossierExiste ? 'fait' : 'à faire');
+    if (e.demo) {
+      $('demo-texte').textContent = 'Mode démonstration actif : société fictive DEMO DSNAP SASU, dépôts simulés. Demandez à Claude « Prépare la DSN de septembre ».';
+      $('demo-bouton').textContent = 'Quitter la démonstration';
+      [2, 3, 4].forEach(function (n) { marquer(n, true, 'démonstration'); });
+      ['e2', 'formulaire'].forEach(function (id) { $(id).style.display = 'none'; });
+      $('fin').style.display = 'block';
+    } else {
+      $('demo-texte').textContent = 'Pas encore prêt ? Essayez DSNap avec une société fictive : les dépôts vont à un simulateur, rien n\'est envoyé à net-entreprises.';
+      $('demo-bouton').textContent = 'Essayer la démonstration';
+      ['e2', 'formulaire'].forEach(function (id) { $(id).style.display = ''; });
+      var id = e.identifiants;
+      if (e.identifiantsExtension) { marquer(2, true, 'réglages de l\'extension'); $('stockage').textContent = 'Les identifiants viennent des réglages de l\'extension DSNap dans Claude. Ceux saisis ici les remplacent.'; }
+      else marquer(2, id.enregistres, id.enregistres ? 'enregistré' : 'à faire');
+      if (id.enregistres) {
+        $('ne-siret').value = id.siret || ''; $('ne-nom').value = id.nom || ''; $('ne-prenom').value = id.prenom || '';
+        $('mdp-indice').textContent = 'Un mot de passe est enregistré : laissez vide pour le garder.';
+        $('stockage').textContent = 'Stockage : ' + (id.stockage || 'trousseau du système') + '.';
+      } else { $('mdp-indice').textContent = ''; if (!e.identifiantsExtension) $('stockage').textContent = ''; }
+      marquer(3, e.configure, e.configure ? 'enregistré' : 'à faire');
+      marquer(4, e.configure, e.configure ? 'enregistré' : 'à faire');
+      $('fin').style.display = e.configure && (id.enregistres || e.identifiantsExtension) ? 'block' : 'none';
+    }
+    remplir(e.formulaire, false);
+    if (!e.formulaire) { $('idcc').value = '9999'; $('codeRisque').value = '999ZZ'; $('paysNaissance').value = 'FR'; $('libelleEmploi').value = 'President'; }
+  }
+
+  function charger() { return api('api/etat').then(function (j) { etat = j; rendre(); chargerListes(); }); }
+
+  $('b-dossier').addEventListener('click', function () {
+    var b = this; occupe(b, true); effacer('m1');
+    api('api/dossier', { chemin: $('dossier').value.trim() }).then(function (j) { etat = j; rendre(); msg('m1', 'ok', 'Dossier prêt : ' + j.dossier + (j.configure ? '\nUne configuration existe déjà dans ce dossier : elle est chargée ci-dessous.' : '')); })
+      .catch(function (e) { msg('m1', 'erreur', e.message); }).then(function () { occupe(b, false); });
+  });
+  $('b-ident').addEventListener('click', function () {
+    var b = this, s = $('ne-siret').value.replace(/\s/g, '');
+    effacer('m2');
+    if (!/^\d{14}$/.test(s)) { msg('m2', 'erreur', 'Le SIRET compte 14 chiffres.'); return; }
+    occupe(b, true);
+    api('api/identifiants', { siret: s, nom: $('ne-nom').value, prenom: $('ne-prenom').value, motdepasse: $('ne-mdp').value })
+      .then(function (j) { $('ne-mdp').value = ''; msg('m2', 'ok', 'Identifiants enregistrés. Testez la connexion pour les vérifier.'); return charger(); })
+      .catch(function (e) { msg('m2', 'erreur', e.message); }).then(function () { occupe(b, false); });
+  });
+  $('b-tester').addEventListener('click', function () {
+    var b = this; occupe(b, true); msg('m2', 'info', 'Connexion à net-entreprises…');
+    api('api/tester', {}).then(function (j) { msg('m2', j.ok ? 'ok' : 'erreur', j.message); }).catch(function (e) { msg('m2', 'erreur', e.message); }).then(function () { occupe(b, false); });
+  });
+  $('b-oublier').addEventListener('click', function () {
+    if (!confirm('Effacer les identifiants net-entreprises de cet ordinateur ?')) return;
+    api('api/oublier-identifiants', {}).then(function (j) { etat = j; $('ne-siret').value = ''; $('ne-nom').value = ''; $('ne-prenom').value = ''; rendre(); msg('m2', 'ok', 'Identifiants effacés.'); }).catch(function (e) { msg('m2', 'erreur', e.message); });
+  });
+  $('demo-bouton').addEventListener('click', function () {
+    var b = this; occupe(b, true);
+    api('api/demo', { actif: !(etat && etat.demo) }).then(function (j) { etat = j; rendre(); }).catch(function (e) { alert(e.message); }).then(function () { occupe(b, false); });
+  });
+  $('import').addEventListener('change', function () {
+    var f = this.files && this.files[0]; if (!f) return;
+    effacer('m-import');
+    var lecteur = new FileReader();
+    lecteur.onload = function () {
+      var octets = new Uint8Array(lecteur.result), bin = '';
+      for (var i = 0; i < octets.length; i += 0x8000) bin += String.fromCharCode.apply(null, octets.subarray(i, i + 0x8000));
+      api('api/import', { nom: f.name, contenu: btoa(bin) }).then(function (j) {
+        remplir(j.formulaire, true);
+        msg('m-import', 'ok', 'DSN de ' + (j.mois || '?') + ' importée et copiée dans ' + j.fichier + '. Vérifiez les champs, complétez ceux qui manquent' + (j.formulaire.nirEnregistre ? ' (le numéro de sécurité sociale a été repris du fichier)' : '') + ', puis enregistrez en bas de page.');
+      }).catch(function (e) { msg('m-import', 'erreur', e.message); });
+    };
+    lecteur.readAsArrayBuffer(f);
+  });
+  function verifierPcs() {
+    var v = $('pcs').value.trim(), l = tablesChargees.PCSESE, t = '';
+    if (v && l) { var c = l.filter(function (x) { return x.code === v; })[0]; t = c ? c.libelle : 'Code inconnu de la table PCS-ESE : choisissez dans la liste.'; }
+    $('pcs-indice').textContent = t;
+  }
+  $('pcs').addEventListener('change', verifierPcs);
+  $('nir').addEventListener('input', function () {
+    var n = this.value.replace(/\s/g, '').toUpperCase(), t = '';
+    if (n.length === 15) t = cleNir(n.slice(0, 13)) === n.slice(13) ? 'Clé correcte.' : 'La clé ne correspond pas : vérifiez le numéro.';
+    else if (n.length) t = n.length + ' caractères sur 15.';
+    $('nir-indice').textContent = t;
+  });
+  $('siret').addEventListener('change', function () { var s = this.value.replace(/\s/g, ''); this.setCustomValidity(/^\d{14}$/.test(s) && luhn(s) ? '' : 'SIRET invalide (14 chiffres, clé de contrôle).'); });
+  $('formulaire').addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    var b = $('b-config'), form = this, d = {};
+    effacer('m5');
+    Array.prototype.forEach.call(form.elements, function (el) {
+      if (!el.name) return;
+      if (el.type === 'radio') { if (el.checked) d[el.name] = el.value; return; }
+      if (el.type === 'checkbox') { d[el.name] = el.checked; return; }
+      d[el.name] = el.value;
+    });
+    if (form.dataset.reference) d.dsnReference = form.dataset.reference;
+    occupe(b, true);
+    api('api/config', d).then(function (j) {
+      var v = j.verification;
+      if (v && v.erreurs && v.erreurs.length) msg('m5', 'info', 'Configuration enregistrée dans ' + j.fichier + '. Points à compléter avant la première DSN :\n• ' + v.erreurs.join('\n• '));
+      else msg('m5', 'ok', 'Configuration enregistrée dans ' + j.fichier + '. Un essai de calcul ne signale aucune erreur.');
+      return charger();
+    }).catch(function (e) { msg('m5', 'erreur', e.message); }).then(function () { occupe(b, false); });
+  });
+  $('b-terminer').addEventListener('click', function () { api('api/terminer', {}).then(function () { document.body.innerHTML = '<main><p class="intro">Configuration fermée. Vous pouvez fermer cet onglet et revenir dans Claude.</p></main>'; }); });
+  charger().catch(function (e) { document.querySelector('.intro').textContent = 'Erreur : ' + e.message; });
+})();
+</script>
+</body>
+</html>
