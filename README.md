@@ -1,6 +1,6 @@
 # DSNap : serveur MCP pour la DSN (déclaration sociale nominative)
 
-[![DSNap MCP server](https://mcprush.com/badge/dsnap-mcp/card.svg)](https://mcprush.com/to/dsnap-mcp?ref=badge)
+[![DSNap MCP server](https://mcprush.com/badge/dsnap-mcp/card.svg)](https://mcprush.com/to/dsnap-mcp?ref=badge) [![64Etienne/cerfaless-dsnap MCP server](https://glama.ai/mcp/servers/64Etienne/cerfaless-dsnap/badges/score.svg)](https://glama.ai/mcp/servers/64Etienne/cerfaless-dsnap)
 
 **Un MCP DSN pour la France : la paie et la DSN du président de SASU, préparées, contrôlées et déposées sur net-entreprises depuis Claude.**
 
