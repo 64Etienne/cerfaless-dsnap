@@ -1,0 +1,29 @@
+# Fusion automatique des PR portant l'étiquette « fusion-auto », ouvertes depuis ce dépôt (pas depuis une copie extérieure).
+# Décision d'Etienne du 27/11/2026 : « je veux que tu puisses merge automatiquement sans mon intervention comme c'est déjà le cas
+# pour certains projets […] je veux qu'il couvre ce projet ». Même robot que dans les dépôts privés du projet Cerfaless
+# (dsnap, dsnap-site, mcp-inpi, equipe-ia, atelier-bibliotheque), adapté aux protections de ce dépôt public :
+# - fusion compressée (--squash) : la règle « Protection de main » exige un historique en ligne droite ;
+# - fusion différée (--auto, réglage « Allow auto-merge » du dépôt) : GitHub attend que l'analyse CodeQL exigée soit passée.
+# Une PR qui modifie un robot (.github/workflows) ne peut pas être fusionnée par ce jeton : elle reste pour Etienne.
+# Ce robot est propre au dépôt public : outils/publier-public.sh (dépôt dsnap) le garde à chaque publication.
+name: Fusion automatique
+on:
+  pull_request:
+    types: [opened, reopened, labeled, synchronize, ready_for_review]
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: fusion-auto-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  fusionner:
+    if: contains(github.event.pull_request.labels.*.name, 'fusion-auto') && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: fusion compressée, dès que les contrôles exigés sont passés
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: gh pr merge "$PR" --squash --auto --repo "$GITHUB_REPOSITORY"
